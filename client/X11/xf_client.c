@@ -23,6 +23,7 @@
  */
 
 #include <freerdp/config.h>
+#include "xf_reconnect.h"
 
 #include <math.h>
 #include <winpr/cast.h>
@@ -82,6 +83,7 @@
 
 #include <freerdp/client/file.h>
 #include <freerdp/client/cmdline.h>
+#include <freerdp/client/aad_helper.h>
 
 #include <winpr/crt.h>
 #include <winpr/synch.h>
@@ -146,7 +148,8 @@ static const struct xf_exit_code_map_t xf_exit_code_map[] = {
 	{ FREERDP_ERROR_CONNECT_ACCOUNT_EXPIRED, XF_EXIT_CONNECT_ACCOUNT_EXPIRED },
 	{ FREERDP_ERROR_CONNECT_LOGON_TYPE_NOT_GRANTED, XF_EXIT_CONNECT_LOGON_TYPE_NOT_GRANTED },
 	{ FREERDP_ERROR_CONNECT_NO_OR_MISSING_CREDENTIALS, XF_EXIT_CONNECT_NO_OR_MISSING_CREDENTIALS },
-	{ FREERDP_ERROR_CONNECT_TARGET_BOOTING, XF_EXIT_CONNECT_TARGET_BOOTING }
+	{ FREERDP_ERROR_CONNECT_TARGET_BOOTING, XF_EXIT_CONNECT_TARGET_BOOTING },
+	{ FREERDP_ERROR_CONNECT_HYBRID_REQUIRED_BY_SERVER, XF_EXIT_CONNECT_HYBRID_REQUIRED_BY_SERVER }
 };
 
 static BOOL xf_setup_x11(xfContext* xfc);
@@ -172,14 +175,14 @@ static BOOL xf_get_pixmap_info(xfContext* xfc);
 #ifdef WITH_XRENDER
 static void xf_draw_screen_scaled(xfContext* xfc, int x, int y, int w, int h)
 {
-	XTransform transform = { 0 };
+	XTransform transform = WINPR_C_ARRAY_INIT;
 	Picture windowPicture = 0;
 	Picture primaryPicture = 0;
 	XRenderPictureAttributes pa;
-	XRenderPictFormat* picFormat = NULL;
+	XRenderPictFormat* picFormat = nullptr;
 	int x2 = 0;
 	int y2 = 0;
-	const char* filter = NULL;
+	const char* filter = nullptr;
 	WINPR_ASSERT(xfc);
 
 	rdpSettings* settings = xfc->common.context.settings;
@@ -249,7 +252,7 @@ static void xf_draw_screen_scaled(xfContext* xfc, int x, int y, int w, int h)
 		if (absInverse < MIN_PIXEL_DIFF)
 			filter = FilterNearest;
 	}
-	XRenderSetPictureFilter(xfc->display, primaryPicture, filter, 0, 0);
+	XRenderSetPictureFilter(xfc->display, primaryPicture, filter, nullptr, 0);
 	transform.matrix[0][0] = XDoubleToFixed(xScalingFactor);
 	transform.matrix[0][1] = XDoubleToFixed(0.0);
 	transform.matrix[0][2] = XDoubleToFixed(0.0);
@@ -281,21 +284,17 @@ static void xf_draw_screen_scaled(xfContext* xfc, int x, int y, int w, int h)
 
 BOOL xf_picture_transform_required(xfContext* xfc)
 {
-	rdpSettings* settings = NULL;
+	rdpSettings* settings = nullptr;
 
 	WINPR_ASSERT(xfc);
 
 	settings = xfc->common.context.settings;
 	WINPR_ASSERT(settings);
 
-	if ((xfc->offset_x != 0) || (xfc->offset_y != 0) ||
+	return (
+	    (xfc->offset_x != 0) || (xfc->offset_y != 0) ||
 	    (xfc->scaledWidth != (INT64)freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth)) ||
-	    (xfc->scaledHeight != (INT64)freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight)))
-	{
-		return TRUE;
-	}
-
-	return FALSE;
+	    (xfc->scaledHeight != (INT64)freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight)));
 }
 #endif /* WITH_XRENDER defined */
 
@@ -304,7 +303,7 @@ void xf_draw_screen_(xfContext* xfc, int x, int y, int w, int h, const char* fkt
 {
 	if (!xfc)
 	{
-		WLog_DBG(TAG, "called from [%s] xfc=%p", fkt, xfc);
+		WLog_DBG(TAG, "called from [%s] xfc=nullptr", fkt);
 		return;
 	}
 
@@ -316,7 +315,7 @@ void xf_draw_screen_(xfContext* xfc, int x, int y, int w, int h, const char* fkt
 
 	if (!xfc->window)
 	{
-		WLog_WARN(TAG, "invalid xfc->window=%p", xfc->window);
+		WLog_WARN(TAG, "invalid xfc->window=nullptr");
 		return;
 	}
 
@@ -345,7 +344,7 @@ static BOOL xf_desktop_resize(rdpContext* context)
 
 	if (xfc->primary)
 	{
-		BOOL same = (xfc->primary == xfc->drawing) ? TRUE : FALSE;
+		BOOL same = (xfc->primary == xfc->drawing);
 		LogDynAndXFreePixmap(xfc->log, xfc->display, xfc->primary);
 
 		WINPR_ASSERT(xfc->depth != 0);
@@ -420,7 +419,7 @@ static BOOL xf_paint(xfContext* xfc, const GDI_RGN* region)
 			                            WINPR_ASSERTING_INT_CAST(UINT16, region->x + region->w),
 			                        .bottom =
 			                            WINPR_ASSERTING_INT_CAST(UINT16, region->y + region->h) };
-		xf_rail_paint(xfc, &rect);
+		return xf_rail_paint(xfc, &rect);
 	}
 	else
 	{
@@ -511,7 +510,7 @@ static BOOL xf_sw_desktop_resize(rdpContext* context)
 
 	if (xfc->image)
 	{
-		xfc->image->data = NULL;
+		xfc->image->data = nullptr;
 		XDestroyImage(xfc->image);
 	}
 
@@ -548,12 +547,15 @@ static BOOL xf_process_x_events(freerdp* instance)
 
 		if (pending_status)
 		{
-			XEvent xevent = { 0 };
+			XEvent xevent = WINPR_C_ARRAY_INIT;
 
 			XNextEvent(xfc->display, &xevent);
 			status = xf_event_process(instance, &xevent);
 		}
 		xf_unlock_x11(xfc);
+		if (!status)
+			break;
+		status = xf_event_update_screen(instance);
 		if (!status)
 			break;
 	}
@@ -564,12 +566,12 @@ static BOOL xf_process_x_events(freerdp* instance)
 static char* xf_window_get_title(rdpSettings* settings)
 {
 	BOOL port = 0;
-	char* windowTitle = NULL;
+	char* windowTitle = nullptr;
 	size_t size = 0;
 	const char* prefix = "FreeRDP:";
 
 	if (!settings)
-		return NULL;
+		return nullptr;
 
 	const char* name = freerdp_settings_get_string(settings, FreeRDP_ServerHostname);
 	const char* title = freerdp_settings_get_string(settings, FreeRDP_WindowTitle);
@@ -583,7 +585,7 @@ static char* xf_window_get_title(rdpSettings* settings)
 	windowTitle = calloc(size, sizeof(char));
 
 	if (!windowTitle)
-		return NULL;
+		return nullptr;
 
 	if (!port)
 		(void)sprintf_s(windowTitle, size, "%s %s", prefix, name);
@@ -596,9 +598,9 @@ static char* xf_window_get_title(rdpSettings* settings)
 
 BOOL xf_create_window(xfContext* xfc)
 {
-	XGCValues gcv = { 0 };
-	XEvent xevent = { 0 };
-	char* windowTitle = NULL;
+	XGCValues gcv = WINPR_C_ARRAY_INIT;
+	XEvent xevent = WINPR_C_ARRAY_INIT;
+	char* windowTitle = nullptr;
 
 	WINPR_ASSERT(xfc);
 	rdpSettings* settings = xfc->common.context.settings;
@@ -609,7 +611,7 @@ BOOL xf_create_window(xfContext* xfc)
 	int height =
 	    WINPR_ASSERTING_INT_CAST(int, freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight));
 
-	const XSetWindowAttributes empty = { 0 };
+	const XSetWindowAttributes empty = WINPR_C_ARRAY_INIT;
 	xfc->attribs = empty;
 
 	if (xfc->remote_app)
@@ -617,7 +619,7 @@ BOOL xf_create_window(xfContext* xfc)
 	else
 		xfc->depth = DefaultDepthOfScreen(xfc->screen);
 
-	XVisualInfo vinfo = { 0 };
+	XVisualInfo vinfo = WINPR_C_ARRAY_INIT;
 	if (XMatchVisualInfo(xfc->display, xfc->screen_number, xfc->depth, TrueColor, &vinfo))
 	{
 		Window root = XDefaultRootWindow(xfc->display);
@@ -686,6 +688,8 @@ BOOL xf_create_window(xfContext* xfc)
 #endif
 		xfc->window = xf_CreateDesktopWindow(xfc, windowTitle, width, height);
 		free(windowTitle);
+		if (!xfc->window)
+			return FALSE;
 
 		if (xfc->fullscreen)
 			xf_SetWindowFullscreen(xfc, xfc->window, xfc->fullscreen);
@@ -768,22 +772,22 @@ void xf_destroy_window(xfContext* xfc)
 	if (xfc->window)
 	{
 		xf_DestroyDesktopWindow(xfc, xfc->window);
-		xfc->window = NULL;
+		xfc->window = nullptr;
 	}
 
 #if defined(CHANNEL_TSMF_CLIENT)
 	if (xfc->xv_context)
 	{
-		xf_tsmf_uninit(xfc, NULL);
-		xfc->xv_context = NULL;
+		xf_tsmf_uninit(xfc, nullptr);
+		xfc->xv_context = nullptr;
 	}
 #endif
 
 	if (xfc->image)
 	{
-		xfc->image->data = NULL;
+		xfc->image->data = nullptr;
 		XDestroyImage(xfc->image);
-		xfc->image = NULL;
+		xfc->image = nullptr;
 	}
 
 	if (xfc->bitmap_mono)
@@ -795,7 +799,7 @@ void xf_destroy_window(xfContext* xfc)
 	if (xfc->gc_mono)
 	{
 		LogDynAndXFreeGC(xfc->log, xfc->display, xfc->gc_mono);
-		xfc->gc_mono = 0;
+		xfc->gc_mono = nullptr;
 	}
 
 	if (xfc->primary)
@@ -807,13 +811,13 @@ void xf_destroy_window(xfContext* xfc)
 	if (xfc->gc)
 	{
 		LogDynAndXFreeGC(xfc->log, xfc->display, xfc->gc);
-		xfc->gc = 0;
+		xfc->gc = nullptr;
 	}
 }
 
 void xf_toggle_fullscreen(xfContext* xfc)
 {
-	WindowStateChangeEventArgs e = { 0 };
+	WindowStateChangeEventArgs e = WINPR_C_ARRAY_INIT;
 	rdpContext* context = (rdpContext*)xfc;
 	rdpSettings* settings = context->settings;
 
@@ -824,18 +828,21 @@ void xf_toggle_fullscreen(xfContext* xfc)
 	if (xfc->debug)
 		xf_ungrab(xfc);
 
-	xfc->fullscreen = (xfc->fullscreen) ? FALSE : TRUE;
+	xfc->fullscreen = !((xfc->fullscreen));
 	xfc->decorations =
 	    (xfc->fullscreen) ? FALSE : freerdp_settings_get_bool(settings, FreeRDP_Decorations);
 	xf_SetWindowFullscreen(xfc, xfc->window, xfc->fullscreen);
 	EventArgsInit(&e, "xfreerdp");
 	e.state = xfc->fullscreen ? FREERDP_WINDOW_STATE_FULLSCREEN : 0;
-	PubSub_OnWindowStateChange(context->pubSub, context, &e);
+	if (PubSub_OnWindowStateChange(context->pubSub, context, &e) < 0)
+	{
+		WLog_Print(xfc->log, WLOG_ERROR, "PubSub_OnWindowStateChange failed");
+	}
 }
 
 void xf_minimize(xfContext* xfc)
 {
-	WindowStateChangeEventArgs e = { 0 };
+	WindowStateChangeEventArgs e = WINPR_C_ARRAY_INIT;
 	rdpContext* context = (rdpContext*)xfc;
 	WINPR_ASSERT(context);
 
@@ -849,7 +856,10 @@ void xf_minimize(xfContext* xfc)
 	xf_SetWindowMinimized(xfc, xfc->window);
 
 	e.state = xfc->fullscreen ? FREERDP_WINDOW_STATE_FULLSCREEN : 0;
-	PubSub_OnWindowStateChange(context->pubSub, context, &e);
+	if (PubSub_OnWindowStateChange(context->pubSub, context, &e) < 0)
+	{
+		WLog_Print(xfc->log, WLOG_ERROR, "PubSub_OnWindowStateChange failed");
+	}
 }
 
 void xf_lock_x11_(xfContext* xfc, WINPR_ATTR_UNUSED const char* fkt)
@@ -878,7 +888,7 @@ void xf_unlock_x11_(xfContext* xfc, WINPR_ATTR_UNUSED const char* fkt)
 static BOOL xf_get_pixmap_info(xfContext* xfc)
 {
 	int pf_count = 0;
-	XPixmapFormatValues* pfs = NULL;
+	XPixmapFormatValues* pfs = nullptr;
 
 	WINPR_ASSERT(xfc->display);
 	pfs = XListPixmapFormats(xfc->display, &pf_count);
@@ -902,15 +912,12 @@ static BOOL xf_get_pixmap_info(xfContext* xfc)
 	}
 
 	XFree(pfs);
-	if ((xfc->visual == NULL) || (xfc->scanline_pad == 0))
-		return FALSE;
-
-	return TRUE;
+	return !((xfc->visual == nullptr) || (xfc->scanline_pad == 0));
 }
 
 static int xf_error_handler(Display* d, XErrorEvent* ev)
 {
-	char buf[256] = { 0 };
+	char buf[256] = WINPR_C_ARRAY_INIT;
 	XGetErrorText(d, ev->error_code, buf, sizeof(buf));
 	const char* what = request_code_2_str(ev->request_code);
 	WLog_ERR(TAG, "%s: %s", what, buf);
@@ -925,7 +932,7 @@ static int xf_error_handler_ex(Display* d, XErrorEvent* ev)
 	 * another window. This make xf_error_handler() a potential
 	 * debugger breakpoint.
 	 */
-#if defined(WITH_DEBUG_X11)
+#if !defined(NDEBUG)
 	XUngrabKeyboard(d, CurrentTime);
 	XUngrabPointer(d, CurrentTime);
 #endif
@@ -981,16 +988,16 @@ static void xf_get_x11_button_map(xfContext* xfc, unsigned char* x11_map)
 	int opcode = 0;
 	int event = 0;
 	int error = 0;
-	XDevice* ptr_dev = NULL;
-	XExtensionVersion* version = NULL;
-	XDeviceInfo* devices1 = NULL;
-	XIDeviceInfo* devices2 = NULL;
+	XDevice* ptr_dev = nullptr;
+	XExtensionVersion* version = nullptr;
+	XDeviceInfo* devices1 = nullptr;
+	XIDeviceInfo* devices2 = nullptr;
 	int num_devices = 0;
 
 	if (XQueryExtension(xfc->display, "XInputExtension", &opcode, &event, &error))
 	{
 		WLog_DBG(TAG, "Searching for XInput pointer device");
-		ptr_dev = NULL;
+		ptr_dev = nullptr;
 		/* loop through every device, looking for a pointer */
 		version = XGetExtensionVersion(xfc->display, INAME);
 
@@ -1045,7 +1052,8 @@ static void xf_get_x11_button_map(xfContext* xfc, unsigned char* x11_map)
 		/* otherwise leave unchanged.                                            */
 		if (ptr_dev)
 		{
-			WLog_DBG(TAG, "Pointer device: %d", ptr_dev->device_id);
+			WLog_DBG(TAG, "Pointer device: %" PRIu32,
+			         WINPR_CXX_COMPAT_CAST(uint32_t, ptr_dev->device_id));
 			XGetDeviceButtonMapping(xfc->display, ptr_dev, x11_map, NUM_BUTTONS_MAPPED);
 			XCloseDevice(xfc->display, ptr_dev);
 		}
@@ -1099,7 +1107,7 @@ void xf_button_map_init(xfContext* xfc)
 
 	/* logical mouse button which is used for each physical mouse  */
 	/* button (indexed from zero). This is the default map.        */
-	unsigned char x11_map[112] = { 0 };
+	unsigned char x11_map[112] = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(xfc);
 	WINPR_ASSERT(xfc->common.context.settings);
@@ -1184,14 +1192,17 @@ static BOOL xf_pre_connect(freerdp* instance)
 		return FALSE;
 	if (!freerdp_settings_set_uint32(settings, FreeRDP_OsMinorType, OSMINORTYPE_NATIVE_XSERVER))
 		return FALSE;
-	PubSub_SubscribeChannelConnected(context->pubSub, xf_OnChannelConnectedEventHandler);
-	PubSub_SubscribeChannelDisconnected(context->pubSub, xf_OnChannelDisconnectedEventHandler);
+	if (PubSub_SubscribeChannelConnected(context->pubSub, xf_OnChannelConnectedEventHandler) < 0)
+		return FALSE;
+	if (PubSub_SubscribeChannelDisconnected(context->pubSub, xf_OnChannelDisconnectedEventHandler) <
+	    0)
+		return FALSE;
 
 	if (!freerdp_settings_get_string(settings, FreeRDP_Username) &&
 	    !freerdp_settings_get_bool(settings, FreeRDP_CredentialsFromStdin) &&
 	    !freerdp_settings_get_bool(settings, FreeRDP_SmartcardLogon))
 	{
-		char login_name[MAX_PATH] = { 0 };
+		char login_name[MAX_PATH] = WINPR_C_ARRAY_INIT;
 		ULONG size = sizeof(login_name) - 1;
 
 		if (GetUserNameExA(NameSamCompatible, login_name, &size))
@@ -1273,7 +1284,7 @@ static BOOL xf_pre_connect(freerdp* instance)
 
 static BOOL xf_inject_keypress(rdpContext* context, const char* buffer, size_t size)
 {
-	WCHAR wbuffer[64] = { 0 };
+	WCHAR wbuffer[64] = WINPR_C_ARRAY_INIT;
 	const SSIZE_T len = ConvertUtf8NToWChar(buffer, size, wbuffer, ARRAYSIZE(wbuffer));
 	if (len < 0)
 		return FALSE;
@@ -1297,18 +1308,19 @@ static BOOL xf_process_pipe(rdpContext* context, const char* pipe)
 	int fd = open(pipe, O_NONBLOCK | O_RDONLY);
 	if (fd < 0)
 	{
-		char ebuffer[256] = { 0 };
+		char ebuffer[256] = WINPR_C_ARRAY_INIT;
 		WLog_ERR(TAG, "pipe '%s' open returned %s [%d]", pipe,
 		         winpr_strerror(errno, ebuffer, sizeof(ebuffer)), errno);
 		return FALSE;
 	}
 	while (!freerdp_shall_disconnect_context(context))
 	{
-		char buffer[64] = { 0 };
+		char buffer[64] = WINPR_C_ARRAY_INIT;
+		errno = 0;
 		ssize_t rd = read(fd, buffer, sizeof(buffer) - 1);
 		if (rd == 0)
 		{
-			char ebuffer[256] = { 0 };
+			char ebuffer[256] = WINPR_C_ARRAY_INIT;
 			if ((errno == EAGAIN) || (errno == 0))
 			{
 				Sleep(100);
@@ -1322,7 +1334,7 @@ static BOOL xf_process_pipe(rdpContext* context, const char* pipe)
 		}
 		else if (rd < 0)
 		{
-			char ebuffer[256] = { 0 };
+			char ebuffer[256] = WINPR_C_ARRAY_INIT;
 			WLog_ERR(TAG, "pipe '%s' read returned %s [%d]", pipe,
 			         winpr_strerror(errno, ebuffer, sizeof(ebuffer)), errno);
 			break;
@@ -1363,18 +1375,20 @@ static DWORD WINAPI xf_handle_pipe(void* arg)
 	const int rc = mkfifo(pipe, S_IWUSR | S_IRUSR);
 	if (rc != 0)
 	{
-		char ebuffer[256] = { 0 };
+		char ebuffer[256] = WINPR_C_ARRAY_INIT;
 		WLog_ERR(TAG, "Failed to create named pipe '%s': %s [%d]", pipe,
 		         winpr_strerror(errno, ebuffer, sizeof(ebuffer)), errno);
 		return 0;
 	}
 
 	void* ctx = WINPR_CAST_CONST_PTR_AWAY(pipe, void*);
-	freerdp_add_signal_cleanup_handler(ctx, cleanup_pipe);
+	if (freerdp_add_signal_cleanup_handler(ctx, cleanup_pipe))
+	{
 
-	xf_process_pipe(context, pipe);
+		xf_process_pipe(context, pipe);
 
-	freerdp_del_signal_cleanup_handler(ctx, cleanup_pipe);
+		freerdp_del_signal_cleanup_handler(ctx, cleanup_pipe);
+	}
 
 	unlink(pipe);
 	return 0;
@@ -1387,7 +1401,7 @@ static DWORD WINAPI xf_handle_pipe(void* arg)
  */
 static BOOL xf_post_connect(freerdp* instance)
 {
-	ResizeWindowEventArgs e = { 0 };
+	ResizeWindowEventArgs e = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(instance);
 	xfContext* xfc = (xfContext*)instance->context;
@@ -1462,7 +1476,7 @@ static BOOL xf_post_connect(freerdp* instance)
 	const char* pipe = freerdp_settings_get_string(settings, FreeRDP_KeyboardPipeName);
 	if (pipe)
 	{
-		xfc->pipethread = CreateThread(NULL, 0, xf_handle_pipe, xfc, 0, NULL);
+		xfc->pipethread = CreateThread(nullptr, 0, xf_handle_pipe, xfc, 0, nullptr);
 		if (!xfc->pipethread)
 			return FALSE;
 	}
@@ -1472,14 +1486,13 @@ static BOOL xf_post_connect(freerdp* instance)
 	    WINPR_ASSERTING_INT_CAST(int, freerdp_settings_get_uint32(settings, FreeRDP_DesktopWidth));
 	e.height =
 	    WINPR_ASSERTING_INT_CAST(int, freerdp_settings_get_uint32(settings, FreeRDP_DesktopHeight));
-	PubSub_OnResizeWindow(context->pubSub, xfc, &e);
-	return TRUE;
+	return PubSub_OnResizeWindow(context->pubSub, xfc, &e) >= 0;
 }
 
 static void xf_post_disconnect(freerdp* instance)
 {
-	xfContext* xfc = NULL;
-	rdpContext* context = NULL;
+	xfContext* xfc = nullptr;
+	rdpContext* context = nullptr;
 
 	if (!instance || !instance->context)
 		return;
@@ -1496,35 +1509,35 @@ static void xf_post_disconnect(freerdp* instance)
 	{
 		(void)WaitForSingleObject(xfc->pipethread, INFINITE);
 		(void)CloseHandle(xfc->pipethread);
-		xfc->pipethread = NULL;
+		xfc->pipethread = nullptr;
 	}
 	if (xfc->clipboard)
 	{
 		xf_clipboard_free(xfc->clipboard);
-		xfc->clipboard = NULL;
+		xfc->clipboard = nullptr;
 	}
 
 	if (xfc->xfDisp)
 	{
 		xf_disp_free(xfc->xfDisp);
-		xfc->xfDisp = NULL;
+		xfc->xfDisp = nullptr;
 	}
 
-	if ((xfc->window != NULL) && (xfc->drawable == xfc->window->handle))
+	if ((xfc->window != nullptr) && (xfc->drawable == xfc->window->handle))
 		xfc->drawable = 0;
 	else
 		xf_DestroyDummyWindow(xfc, xfc->drawable);
 
 	freerdp_keyboard_remap_free(xfc->remap_table);
-	xfc->remap_table = NULL;
+	xfc->remap_table = nullptr;
 
 	xf_destroy_window(xfc);
 }
 
 static void xf_post_final_disconnect(freerdp* instance)
 {
-	xfContext* xfc = NULL;
-	rdpContext* context = NULL;
+	xfContext* xfc = nullptr;
+	rdpContext* context = nullptr;
 
 	if (!instance || !instance->context)
 		return;
@@ -1544,7 +1557,8 @@ static int xf_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
 	WLog_INFO(TAG, "Logon Error Info %s [%s]", str_data, str_type);
 	if (type != LOGON_MSG_SESSION_CONTINUE)
 	{
-		xf_rail_disable_remoteapp_mode(xfc);
+		if (!xf_rail_disable_remoteapp_mode(xfc))
+			return -1;
 	}
 	return 1;
 }
@@ -1554,6 +1568,7 @@ static BOOL handle_window_events(freerdp* instance)
 	if (!xf_process_x_events(instance))
 	{
 		WLog_DBG(TAG, "Closed from X11");
+		freerdp_abort_connect_context(instance->context);
 		return FALSE;
 	}
 
@@ -1572,7 +1587,7 @@ static DWORD WINAPI xf_client_thread(LPVOID param)
 {
 	DWORD exit_code = 0;
 	DWORD waitStatus = 0;
-	HANDLE inputEvent = NULL;
+	HANDLE inputEvent = nullptr;
 
 	freerdp* instance = (freerdp*)param;
 	WINPR_ASSERT(instance);
@@ -1621,7 +1636,7 @@ static DWORD WINAPI xf_client_thread(LPVOID param)
 
 	while (!freerdp_shall_disconnect_context(instance->context))
 	{
-		HANDLE handles[MAXIMUM_WAIT_OBJECTS] = { 0 };
+		HANDLE handles[MAXIMUM_WAIT_OBJECTS] = WINPR_C_ARRAY_INIT;
 		DWORD nCount = 0;
 		handles[nCount++] = inputEvent;
 
@@ -1660,7 +1675,9 @@ static DWORD WINAPI xf_client_thread(LPVOID param)
 		{
 			if (!freerdp_check_event_handles(context))
 			{
-				if (client_auto_reconnect_ex(instance, handle_window_events))
+				const BOOL reconnected = client_auto_reconnect_ex(instance, handle_window_events);
+				xf_reconnect_close(xfc);
+				if (reconnected)
 					continue;
 				else
 				{
@@ -1736,7 +1753,7 @@ static void xf_ZoomingChangeEventHandler(void* context, const ZoomingChangeEvent
 {
 	int w = 0;
 	int h = 0;
-	rdpSettings* settings = NULL;
+	rdpSettings* settings = nullptr;
 	xfContext* xfc = (xfContext*)context;
 
 	WINPR_ASSERT(xfc);
@@ -1771,7 +1788,7 @@ static void xf_ZoomingChangeEventHandler(void* context, const ZoomingChangeEvent
 static void xf_PanningChangeEventHandler(void* context, const PanningChangeEventArgs* e)
 {
 	xfContext* xfc = (xfContext*)context;
-	rdpSettings* settings = NULL;
+	rdpSettings* settings = nullptr;
 
 	WINPR_ASSERT(xfc);
 	WINPR_ASSERT(e);
@@ -1801,10 +1818,7 @@ static BOOL xfreerdp_client_global_init(void)
 	// NOLINTNEXTLINE(concurrency-mt-unsafe)
 	(void)setlocale(LC_ALL, "");
 
-	if (freerdp_handle_signals() != 0)
-		return FALSE;
-
-	return TRUE;
+	return (freerdp_handle_signals() == 0);
 }
 
 static void xfreerdp_client_global_uninit(void)
@@ -1822,7 +1836,8 @@ static int xfreerdp_client_start(rdpContext* context)
 		return -1;
 	}
 
-	if (!(xfc->common.thread = CreateThread(NULL, 0, xf_client_thread, context->instance, 0, NULL)))
+	if (!(xfc->common.thread =
+	          CreateThread(nullptr, 0, xf_client_thread, context->instance, 0, nullptr)))
 	{
 		WLog_ERR(TAG, "failed to create client thread");
 		return -1;
@@ -1847,34 +1862,35 @@ static Atom get_supported_atom(xfContext* xfc, const char* atomName)
 void xf_teardown_x11(xfContext* xfc)
 {
 	WINPR_ASSERT(xfc);
+	xf_reconnect_close(xfc);
 
 	if (xfc->display)
 	{
 		LogDynAndXCloseDisplay(xfc->log, xfc->display);
-		xfc->display = NULL;
+		xfc->display = nullptr;
 	}
 
 	if (xfc->x11event)
 	{
 		(void)CloseHandle(xfc->x11event);
-		xfc->x11event = NULL;
+		xfc->x11event = nullptr;
 	}
 
 	if (xfc->mutex)
 	{
 		(void)CloseHandle(xfc->mutex);
-		xfc->mutex = NULL;
+		xfc->mutex = nullptr;
 	}
 
 	if (xfc->vscreen.monitors)
 	{
 		free(xfc->vscreen.monitors);
-		xfc->vscreen.monitors = NULL;
+		xfc->vscreen.monitors = nullptr;
 	}
 	xfc->vscreen.nmonitors = 0;
 
 	free(xfc->supportedAtoms);
-	xfc->supportedAtoms = NULL;
+	xfc->supportedAtoms = nullptr;
 	xfc->supportedAtomCount = 0;
 }
 
@@ -1898,11 +1914,11 @@ BOOL xf_setup_x11(xfContext* xfc)
 		}
 	}
 
-	xfc->display = XOpenDisplay(NULL);
+	xfc->display = XOpenDisplay(nullptr);
 
 	if (!xfc->display)
 	{
-		WLog_ERR(TAG, "failed to open display: %s", XDisplayName(NULL));
+		WLog_ERR(TAG, "failed to open display: %s", XDisplayName(nullptr));
 		WLog_ERR(TAG, "Please check that the $DISPLAY environment variable is properly set.");
 		goto fail;
 	}
@@ -1913,7 +1929,7 @@ BOOL xf_setup_x11(xfContext* xfc)
 	}
 	def_error_handler = XSetErrorHandler(xf_error_handler_ex);
 
-	xfc->mutex = CreateMutex(NULL, FALSE, NULL);
+	xfc->mutex = CreateMutex(nullptr, FALSE, nullptr);
 
 	if (!xfc->mutex)
 	{
@@ -1937,7 +1953,7 @@ BOOL xf_setup_x11(xfContext* xfc)
 		int actual_format = 0;
 		unsigned long nitems = 0;
 		unsigned long after = 0;
-		unsigned char* data = NULL;
+		unsigned char* data = nullptr;
 		int status = LogDynAndXGetWindowProperty(
 		    xfc->log, xfc->display, RootWindowOfScreen(xfc->screen), xfc->NET_SUPPORTED, 0, 1024,
 		    False, XA_ATOM, &actual_type, &actual_format, &nitems, &after, &data);
@@ -2008,7 +2024,7 @@ BOOL xf_setup_x11(xfContext* xfc)
 	xfc->WM_PROTOCOLS = Logging_XInternAtom(xfc->log, xfc->display, "WM_PROTOCOLS", False);
 	xfc->WM_DELETE_WINDOW = Logging_XInternAtom(xfc->log, xfc->display, "WM_DELETE_WINDOW", False);
 	xfc->WM_STATE = Logging_XInternAtom(xfc->log, xfc->display, "WM_STATE", False);
-	xfc->x11event = CreateFileDescriptorEvent(NULL, FALSE, FALSE, xfc->xfds, WINPR_FD_READ);
+	xfc->x11event = CreateFileDescriptorEvent(nullptr, FALSE, FALSE, xfc->xfds, WINPR_FD_READ);
 
 	xfc->NET_WM_ALLOWED_ACTIONS =
 	    Logging_XInternAtom(xfc->log, xfc->display, "_NET_WM_ALLOWED_ACTIONS", False);
@@ -2059,14 +2075,19 @@ static BOOL xfreerdp_client_new(freerdp* instance, rdpContext* context)
 	WINPR_ASSERT(!xfc->x11event);
 	instance->PreConnect = xf_pre_connect;
 	instance->PostConnect = xf_post_connect;
+	instance->RetryDialog = xf_retry_dialog;
 	instance->PostDisconnect = xf_post_disconnect;
 	instance->PostFinalDisconnect = xf_post_final_disconnect;
 	instance->LogonErrorInfo = xf_logon_error_info;
-	instance->GetAccessToken = client_cli_get_access_token;
-	PubSub_SubscribeTerminate(context->pubSub, xf_TerminateEventHandler);
+	instance->GetAccessToken = client_failsafe_get_access_token;
+
+	if (PubSub_SubscribeTerminate(context->pubSub, xf_TerminateEventHandler) < 0)
+		return FALSE;
 #ifdef WITH_XRENDER
-	PubSub_SubscribeZoomingChange(context->pubSub, xf_ZoomingChangeEventHandler);
-	PubSub_SubscribePanningChange(context->pubSub, xf_PanningChangeEventHandler);
+	if (PubSub_SubscribeZoomingChange(context->pubSub, xf_ZoomingChangeEventHandler) < 0)
+		return FALSE;
+	if (PubSub_SubscribePanningChange(context->pubSub, xf_PanningChangeEventHandler) < 0)
+		return FALSE;
 #endif
 	xfc->log = WLog_Get(TAG);
 

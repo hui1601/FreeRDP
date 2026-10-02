@@ -5,7 +5,7 @@
 
 int TestAlignment(int argc, char* argv[])
 {
-	void* ptr = NULL;
+	void* ptr = nullptr;
 	size_t alignment = 0;
 	size_t offset = 0;
 
@@ -19,9 +19,9 @@ int TestAlignment(int argc, char* argv[])
 
 	/* _aligned_malloc */
 
-	ptr = winpr_aligned_malloc(100, alignment);
+	ptr = winpr_aligned_calloc(1, 100, alignment);
 
-	if (ptr == NULL)
+	if (ptr == nullptr)
 	{
 		printf("Error allocating aligned memory.\n");
 		return -1;
@@ -49,7 +49,7 @@ int TestAlignment(int argc, char* argv[])
 
 	ptr = winpr_aligned_offset_malloc(200, alignment, offset);
 
-	if (ptr == NULL)
+	if (ptr == nullptr)
 	{
 		printf("Error reallocating aligned offset memory.");
 		return -1;
@@ -66,7 +66,7 @@ int TestAlignment(int argc, char* argv[])
 
 	ptr = winpr_aligned_offset_realloc(ptr, 200, alignment, offset);
 
-	if (ptr == NULL)
+	if (ptr == nullptr)
 	{
 		printf("Error reallocating aligned offset memory.");
 		return -1;

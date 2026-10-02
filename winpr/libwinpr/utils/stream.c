@@ -41,83 +41,91 @@
 		}                                                                              \
 	} while (0)
 
+BOOL Stream_ResizeToCapacity(wStream* s, size_t size)
+{
+	const size_t old_capacity = s->capacity;
+	const size_t new_capacity = size;
+	size_t position = Stream_GetPosition(s);
+
+	BYTE* new_buf = nullptr;
+	if (!s->isOwner)
+	{
+		new_buf = (BYTE*)malloc(new_capacity);
+		if (!new_buf)
+			return FALSE;
+
+		CopyMemory(new_buf, s->buffer, s->capacity);
+		s->isOwner = TRUE;
+	}
+	else
+	{
+		new_buf = (BYTE*)realloc(s->buffer, new_capacity);
+		if (!new_buf)
+			return FALSE;
+	}
+
+	s->buffer = new_buf;
+	s->capacity = new_capacity;
+	s->length = new_capacity;
+	if (old_capacity < new_capacity)
+		ZeroMemory(&s->buffer[old_capacity], s->capacity - old_capacity);
+
+	if (position > new_capacity)
+		position = new_capacity;
+	return Stream_SetPosition(s, position);
+}
+
 BOOL Stream_EnsureCapacity(wStream* s, size_t size)
 {
 	WINPR_ASSERT(s);
-	if (s->capacity < size)
-	{
-		size_t position = 0;
-		size_t old_capacity = 0;
-		size_t new_capacity = 0;
-		BYTE* new_buf = NULL;
+	if (s->capacity >= size)
+		return TRUE;
 
-		old_capacity = s->capacity;
-		new_capacity = old_capacity;
+	const size_t increment = 128ull;
+	if (size > SIZE_MAX - increment)
+		return FALSE;
 
-		do
-		{
-			new_capacity *= 2;
-		} while (new_capacity < size);
-
-		position = Stream_GetPosition(s);
-
-		if (!s->isOwner)
-		{
-			new_buf = (BYTE*)malloc(new_capacity);
-			CopyMemory(new_buf, s->buffer, s->capacity);
-			s->isOwner = TRUE;
-		}
-		else
-		{
-			new_buf = (BYTE*)realloc(s->buffer, new_capacity);
-		}
-
-		if (!new_buf)
-			return FALSE;
-		s->buffer = new_buf;
-		s->capacity = new_capacity;
-		s->length = new_capacity;
-		ZeroMemory(&s->buffer[old_capacity], s->capacity - old_capacity);
-
-		Stream_SetPosition(s, position);
-	}
-	return TRUE;
+	const size_t new_capacity = size + increment - size % increment;
+	return Stream_ResizeToCapacity(s, new_capacity);
 }
 
 BOOL Stream_EnsureRemainingCapacity(wStream* s, size_t size)
 {
-	if (Stream_GetPosition(s) + size > Stream_Capacity(s))
+	const size_t pos = Stream_GetPosition(s);
+	if (pos > SIZE_MAX - size)
+		return FALSE;
+	if (pos + size > Stream_Capacity(s))
 		return Stream_EnsureCapacity(s, Stream_Capacity(s) + size);
 	return TRUE;
 }
 
 wStream* Stream_New(BYTE* buffer, size_t size)
 {
-	wStream* s = NULL;
+	wStream* s = nullptr;
 
 	if (!buffer && !size)
-		return NULL;
+		return nullptr;
 
 	s = calloc(1, sizeof(wStream));
 	if (!s)
-		return NULL;
+		return nullptr;
 
 	if (buffer)
 		s->buffer = buffer;
 	else
-		s->buffer = (BYTE*)malloc(size);
+		s->buffer = (BYTE*)calloc(size, sizeof(BYTE));
 
 	if (!s->buffer)
 	{
 		free(s);
-		return NULL;
+		return nullptr;
 	}
 
 	s->pointer = s->buffer;
 	s->capacity = size;
 	s->length = size;
 
-	s->pool = NULL;
+	s->pool = nullptr;
 	s->count = 1;
 	s->isAllocatedStream = TRUE;
 	s->isOwner = TRUE;
@@ -138,7 +146,7 @@ wStream* Stream_StaticConstInit(wStream* s, const BYTE* buffer, size_t size)
 
 wStream* Stream_StaticInit(wStream* s, BYTE* buffer, size_t size)
 {
-	const wStream empty = { 0 };
+	const wStream empty = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(s);
 	WINPR_ASSERT(buffer);
@@ -146,7 +154,7 @@ wStream* Stream_StaticInit(wStream* s, BYTE* buffer, size_t size)
 	*s = empty;
 	s->buffer = s->pointer = buffer;
 	s->capacity = s->length = size;
-	s->pool = NULL;
+	s->pool = nullptr;
 	s->count = 1;
 	s->isAllocatedStream = FALSE;
 	s->isOwner = FALSE;
@@ -237,7 +245,7 @@ BOOL Stream_SetBuffer(wStream* _s, BYTE* _b)
 
 	_s->buffer = _b;
 	_s->pointer = _b;
-	return _s->buffer != NULL;
+	return _s->buffer != nullptr;
 }
 
 void Stream_SetCapacity(wStream* _s, size_t _c)
@@ -319,13 +327,13 @@ BOOL Stream_CheckAndLogRequiredCapacityEx(const char* tag, DWORD level, wStream*
 
 	if (actual < nmemb)
 	{
-		va_list args;
+		va_list args = WINPR_C_ARRAY_INIT;
 
 		va_start(args, fmt);
-		Stream_CheckAndLogRequiredCapacityExVa(tag, level, s, nmemb, size, fmt, args);
+		const BOOL rc =
+		    Stream_CheckAndLogRequiredCapacityExVa(tag, level, s, nmemb, size, fmt, args);
 		va_end(args);
-
-		return FALSE;
+		return rc;
 	}
 	return TRUE;
 }
@@ -353,7 +361,7 @@ BOOL Stream_CheckAndLogRequiredCapacityWLogExVa(wLog* log, DWORD level, wStream*
 
 	if (actual < nmemb)
 	{
-		char prefix[1024] = { 0 };
+		char prefix[1024] = WINPR_C_ARRAY_INIT;
 
 		(void)vsnprintf(prefix, sizeof(prefix), fmt, args);
 
@@ -377,13 +385,13 @@ BOOL Stream_CheckAndLogRequiredCapacityWLogEx(wLog* log, DWORD level, wStream* s
 
 	if (actual < nmemb)
 	{
-		va_list args;
+		va_list args = WINPR_C_ARRAY_INIT;
 
 		va_start(args, fmt);
-		Stream_CheckAndLogRequiredCapacityWLogExVa(log, level, s, nmemb, size, fmt, args);
+		const BOOL rc =
+		    Stream_CheckAndLogRequiredCapacityWLogExVa(log, level, s, nmemb, size, fmt, args);
 		va_end(args);
-
-		return FALSE;
+		return rc;
 	}
 	return TRUE;
 }
@@ -397,13 +405,12 @@ BOOL Stream_CheckAndLogRequiredLengthEx(const char* tag, DWORD level, wStream* s
 
 	if (actual < nmemb)
 	{
-		va_list args;
+		va_list args = WINPR_C_ARRAY_INIT;
 
 		va_start(args, fmt);
-		Stream_CheckAndLogRequiredLengthExVa(tag, level, s, nmemb, size, fmt, args);
+		const BOOL rc = Stream_CheckAndLogRequiredLengthExVa(tag, level, s, nmemb, size, fmt, args);
 		va_end(args);
-
-		return FALSE;
+		return rc;
 	}
 	return TRUE;
 }
@@ -428,13 +435,13 @@ BOOL Stream_CheckAndLogRequiredLengthWLogEx(wLog* log, DWORD level, wStream* s, 
 
 	if (actual < nmemb)
 	{
-		va_list args;
+		va_list args = WINPR_C_ARRAY_INIT;
 
 		va_start(args, fmt);
-		Stream_CheckAndLogRequiredLengthWLogExVa(log, level, s, nmemb, size, fmt, args);
+		const BOOL rc =
+		    Stream_CheckAndLogRequiredLengthWLogExVa(log, level, s, nmemb, size, fmt, args);
 		va_end(args);
-
-		return FALSE;
+		return rc;
 	}
 	return TRUE;
 }
@@ -449,15 +456,18 @@ BOOL Stream_CheckAndLogRequiredLengthWLogExVa(wLog* log, DWORD level, wStream* s
 
 	if (actual < nmemb)
 	{
-		char prefix[1024] = { 0 };
+		if (WLog_IsLevelActive(log, level))
+		{
+			char prefix[1024] = WINPR_C_ARRAY_INIT;
 
-		(void)vsnprintf(prefix, sizeof(prefix), fmt, args);
+			(void)vsnprintf(prefix, sizeof(prefix), fmt, args);
 
-		WLog_Print(log, level,
-		           "[%s] invalid length, got %" PRIuz ", require at least %" PRIuz
-		           " [element size=%" PRIuz "]",
-		           prefix, actual, nmemb, size);
-		winpr_log_backtrace_ex(log, level, 20);
+			WLog_Print(log, level,
+			           "[%s] invalid length, got %" PRIuz ", require at least %" PRIuz
+			           " [element size=%" PRIuz "]",
+			           prefix, actual, nmemb, size);
+			winpr_log_backtrace_ex(log, level, 20);
+		}
 		return FALSE;
 	}
 	return TRUE;
@@ -467,22 +477,25 @@ SSIZE_T Stream_Write_UTF16_String_From_UTF8(wStream* s, size_t wcharLength, cons
                                             size_t length, BOOL fill)
 {
 	SSIZE_T rc = 0;
-	WCHAR* str = Stream_PointerAs(s, WCHAR);
+	if (!Stream_CheckAndLogRequiredCapacityOfSize(STREAM_TAG, s, wcharLength, sizeof(WCHAR)))
+		return -1;
 
 	if (length != 0)
 	{
-		if (!Stream_CheckAndLogRequiredCapacityOfSize(STREAM_TAG, s, wcharLength, sizeof(WCHAR)))
+		size_t wlen = 0;
+		WCHAR* str = ConvertUtf8NToWCharAlloc(src, length, &wlen);
+		if (!str)
 			return -1;
 
-		rc = ConvertUtf8NToWChar(src, length, str, wcharLength);
-		if (rc < 0)
-			return -1;
-
-		Stream_Seek(s, (size_t)rc * sizeof(WCHAR));
+		if (wlen > wcharLength)
+			wlen = wcharLength;
+		Stream_Write(s, str, wlen * sizeof(WCHAR));
+		free(str);
+		rc = WINPR_ASSERTING_INT_CAST(SSIZE_T, wlen);
 	}
 
 	if (fill)
-		Stream_Zero(s, (wcharLength - (size_t)rc) * sizeof(WCHAR));
+		Stream_Zero(s, (wcharLength - WINPR_ASSERTING_INT_CAST(size_t, rc)) * sizeof(WCHAR));
 	return rc;
 }
 
@@ -490,10 +503,10 @@ char* Stream_Read_UTF16_String_As_UTF8(wStream* s, size_t wcharLength, size_t* p
 {
 	const WCHAR* str = Stream_ConstPointer(s);
 	if (wcharLength > SIZE_MAX / sizeof(WCHAR))
-		return NULL;
+		return nullptr;
 
 	if (!Stream_CheckAndLogRequiredLength(STREAM_TAG, s, wcharLength * sizeof(WCHAR)))
-		return NULL;
+		return nullptr;
 
 	Stream_Seek(s, wcharLength * sizeof(WCHAR));
 	return ConvertWCharNToUtf8Alloc(str, wcharLength, pUtfCharLength);
@@ -520,5 +533,15 @@ BOOL Stream_SafeSeekEx(wStream* s, size_t size, const char* file, size_t line, c
 		return FALSE;
 
 	Stream_Seek(s, size);
+	return TRUE;
+}
+
+BOOL Stream_SafeZeroEx(wStream* s, size_t size, const char* file, size_t line, const char* fkt)
+{
+	if (!Stream_CheckAndLogRequiredCapacityEx(STREAM_TAG, WLOG_WARN, s, size, 1,
+	                                          "%s(%s:%" PRIuz ")", fkt, file, line))
+		return FALSE;
+
+	Stream_Zero(s, size);
 	return TRUE;
 }

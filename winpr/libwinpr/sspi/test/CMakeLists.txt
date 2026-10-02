@@ -6,13 +6,20 @@ disable_warnings_for_directory(${CMAKE_CURRENT_BINARY_DIR})
 set(${MODULE_PREFIX}_DRIVER ${MODULE_NAME}.c)
 
 set(${MODULE_PREFIX}_TESTS
-    TestQuerySecurityPackageInfo.c TestEnumerateSecurityPackages.c TestInitializeSecurityContext.c
-    TestAcquireCredentialsHandle.c TestCredSSP.c
+    TestQuerySecurityPackageInfo.c
+    TestEnumerateSecurityPackages.c
+    TestInitializeSecurityContext.c
+    TestAcquireCredentialsHandle.c
+    TestCredSSP.c
     #TestSchannel.c
-    TestNTLM.c
+    TestSspiNTLM.c
+    TestSspiPasswordHash.c
+    TestCredentialZeroing.c
 )
 
 create_test_sourcelist(${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_DRIVER} ${${MODULE_PREFIX}_TESTS})
+
+set(FUZZERS TestFuzzNTLMMessage.c)
 
 include_directories(SYSTEM ${OPENSSL_INCLUDE_DIR})
 
@@ -22,7 +29,10 @@ if(WIN32)
   set(${MODULE_PREFIX}_LIBS ${${MODULE_PREFIX}_LIBS} secur32 crypt32)
 endif()
 
-target_link_libraries(${MODULE_NAME} ${${MODULE_PREFIX}_LIBS} winpr)
+target_link_libraries(${MODULE_NAME} PRIVATE ${${MODULE_PREFIX}_LIBS} winpr)
+
+include(AddFuzzerTest)
+add_fuzzer_test("${FUZZERS}" "winpr")
 
 set_target_properties(${MODULE_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${TESTING_OUTPUT_DIRECTORY}")
 

@@ -79,23 +79,23 @@ static void schannel_context_cleanup(SCHANNEL_OPENSSL* context)
 	WINPR_ASSERT(context);
 
 	free(context->ReadBuffer);
-	context->ReadBuffer = NULL;
+	context->ReadBuffer = nullptr;
 
 	if (context->bioWrite)
 		BIO_free_all(context->bioWrite);
-	context->bioWrite = NULL;
+	context->bioWrite = nullptr;
 
 	if (context->bioRead)
 		BIO_free_all(context->bioRead);
-	context->bioRead = NULL;
+	context->bioRead = nullptr;
 
 	if (context->ssl)
 		SSL_free(context->ssl);
-	context->ssl = NULL;
+	context->ssl = nullptr;
 
 	if (context->ctx)
 		SSL_CTX_free(context->ctx);
-	context->ctx = NULL;
+	context->ctx = nullptr;
 }
 
 static const SSL_METHOD* get_method(BOOL server)
@@ -276,10 +276,16 @@ int schannel_openssl_server_init(SCHANNEL_OPENSSL* context)
 	SSL_CTX_set_options(context->ctx, options);
 
 #if defined(WITH_DEBUG_SCHANNEL)
-	if (SSL_CTX_use_RSAPrivateKey_file(context->ctx, "/tmp/localhost.key", SSL_FILETYPE_PEM) <= 0)
 	{
-		WLog_ERR(TAG, "SSL_CTX_use_RSAPrivateKey_file failed");
-		goto fail;
+		const char* key = getenv("FREERDP_SCHANNEL_KEY");
+		if (!key)
+			key = "/tmp/localhost.key";
+
+		if (SSL_CTX_use_PrivateKey_file(context->ctx, key, SSL_FILETYPE_PEM) <= 0)
+		{
+			WLog_ERR(TAG, "SSL_CTX_use_RSAPrivateKey_file failed");
+			goto fail;
+		}
 	}
 #endif
 
@@ -366,7 +372,7 @@ SECURITY_STATUS schannel_openssl_client_process_tokens(SCHANNEL_OPENSSL* context
 {
 	int status = 0;
 	int ssl_error = 0;
-	PSecBuffer pBuffer = NULL;
+	PSecBuffer pBuffer = nullptr;
 
 	if (!context->connected)
 	{
@@ -435,7 +441,7 @@ SECURITY_STATUS schannel_openssl_server_process_tokens(SCHANNEL_OPENSSL* context
 {
 	int status = 0;
 	int ssl_error = 0;
-	PSecBuffer pBuffer = NULL;
+	PSecBuffer pBuffer = nullptr;
 
 	if (!context->connected)
 	{
@@ -503,9 +509,9 @@ SECURITY_STATUS schannel_openssl_encrypt_message(SCHANNEL_OPENSSL* context, PSec
 {
 	int status = 0;
 	int ssl_error = 0;
-	PSecBuffer pStreamBodyBuffer = NULL;
-	PSecBuffer pStreamHeaderBuffer = NULL;
-	PSecBuffer pStreamTrailerBuffer = NULL;
+	PSecBuffer pStreamBodyBuffer = nullptr;
+	PSecBuffer pStreamHeaderBuffer = nullptr;
+	PSecBuffer pStreamTrailerBuffer = nullptr;
 	pStreamHeaderBuffer = sspi_FindSecBuffer(pMessage, SECBUFFER_STREAM_HEADER);
 	pStreamBodyBuffer = sspi_FindSecBuffer(pMessage, SECBUFFER_DATA);
 	pStreamTrailerBuffer = sspi_FindSecBuffer(pMessage, SECBUFFER_STREAM_TRAILER);
@@ -552,9 +558,9 @@ SECURITY_STATUS schannel_openssl_decrypt_message(SCHANNEL_OPENSSL* context, PSec
 {
 	int status = 0;
 	int length = 0;
-	BYTE* buffer = NULL;
+	BYTE* buffer = nullptr;
 	int ssl_error = 0;
-	PSecBuffer pBuffer = NULL;
+	PSecBuffer pBuffer = nullptr;
 	pBuffer = sspi_FindSecBuffer(pMessage, SECBUFFER_DATA);
 
 	if (!pBuffer)
@@ -587,12 +593,13 @@ SECURITY_STATUS schannel_openssl_decrypt_message(SCHANNEL_OPENSSL* context, PSec
 
 SCHANNEL_OPENSSL* schannel_openssl_new(void)
 {
-	SCHANNEL_OPENSSL* context = NULL;
-	context = (SCHANNEL_OPENSSL*)calloc(1, sizeof(SCHANNEL_OPENSSL));
+	if (!winpr_InitializeSSL(WINPR_SSL_INIT_DEFAULT))
+		return nullptr;
 
-	if (context != NULL)
+	SCHANNEL_OPENSSL* context = (SCHANNEL_OPENSSL*)calloc(1, sizeof(SCHANNEL_OPENSSL));
+
+	if (context != nullptr)
 	{
-		winpr_InitializeSSL(WINPR_SSL_INIT_DEFAULT);
 		context->connected = FALSE;
 	}
 
@@ -647,7 +654,7 @@ SECURITY_STATUS schannel_openssl_decrypt_message(SCHANNEL_OPENSSL* context, PSec
 
 SCHANNEL_OPENSSL* schannel_openssl_new(void)
 {
-	return NULL;
+	return nullptr;
 }
 
 void schannel_openssl_free(SCHANNEL_OPENSSL* context)

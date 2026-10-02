@@ -36,8 +36,8 @@
 #include "cliprdr_format.h"
 #include "../cliprdr_common.h"
 
-CLIPRDR_FORMAT_LIST cliprdr_filter_format_list(const CLIPRDR_FORMAT_LIST* list, const UINT32 mask,
-                                               const UINT32 checkMask)
+CLIPRDR_FORMAT_LIST cliprdr_filter_format_list(const CLIPRDR_FORMAT_LIST* list, UINT32 mask,
+                                               UINT32 checkMask)
 {
 	const UINT32 maskData =
 	    checkMask & (CLIPRDR_FLAG_LOCAL_TO_REMOTE | CLIPRDR_FLAG_REMOTE_TO_LOCAL);
@@ -45,10 +45,18 @@ CLIPRDR_FORMAT_LIST cliprdr_filter_format_list(const CLIPRDR_FORMAT_LIST* list, 
 	    checkMask & (CLIPRDR_FLAG_LOCAL_TO_REMOTE_FILES | CLIPRDR_FLAG_REMOTE_TO_LOCAL_FILES);
 	WINPR_ASSERT(list);
 
-	CLIPRDR_FORMAT_LIST filtered = { 0 };
+	CLIPRDR_FORMAT_LIST filtered = WINPR_C_ARRAY_INIT;
 	filtered.common.msgType = CB_FORMAT_LIST;
 	filtered.numFormats = list->numFormats;
-	filtered.formats = calloc(filtered.numFormats, sizeof(CLIPRDR_FORMAT));
+	if (filtered.numFormats > 0)
+	{
+		filtered.formats = calloc(filtered.numFormats, sizeof(CLIPRDR_FORMAT));
+		if (!filtered.formats)
+		{
+			const CLIPRDR_FORMAT_LIST empty = WINPR_C_ARRAY_INIT;
+			return empty;
+		}
+	}
 
 	size_t wpos = 0;
 	if ((mask & checkMask) == checkMask)
@@ -112,8 +120,8 @@ CLIPRDR_FORMAT_LIST cliprdr_filter_format_list(const CLIPRDR_FORMAT_LIST* list, 
 UINT cliprdr_process_format_list(cliprdrPlugin* cliprdr, wStream* s, UINT32 dataLen,
                                  UINT16 msgFlags)
 {
-	CLIPRDR_FORMAT_LIST formatList = { 0 };
-	CLIPRDR_FORMAT_LIST filteredFormatList = { 0 };
+	CLIPRDR_FORMAT_LIST formatList = WINPR_C_ARRAY_INIT;
+	CLIPRDR_FORMAT_LIST filteredFormatList = WINPR_C_ARRAY_INIT;
 	CliprdrClientContext* context = cliprdr_get_client_interface(cliprdr);
 	UINT error = CHANNEL_RC_OK;
 
@@ -125,34 +133,37 @@ UINT cliprdr_process_format_list(cliprdrPlugin* cliprdr, wStream* s, UINT32 data
 	         cliprdr_read_format_list(cliprdr->log, s, &formatList, cliprdr->useLongFormatNames)))
 		goto error_out;
 
-	const UINT32 mask =
-	    freerdp_settings_get_uint32(context->rdpcontext->settings, FreeRDP_ClipboardFeatureMask);
-	filteredFormatList = cliprdr_filter_format_list(
-	    &formatList, mask, CLIPRDR_FLAG_REMOTE_TO_LOCAL | CLIPRDR_FLAG_REMOTE_TO_LOCAL_FILES);
-	if (filteredFormatList.numFormats == 0)
-		goto error_out;
-
-	const DWORD level = WLOG_DEBUG;
-	if (WLog_IsLevelActive(cliprdr->log, level))
 	{
-		WLog_Print(cliprdr->log, level, "ServerFormatList: numFormats: %" PRIu32 "",
-		           formatList.numFormats);
-		for (size_t x = 0; x < formatList.numFormats; x++)
-		{
-			const CLIPRDR_FORMAT* format = &formatList.formats[x];
-			WLog_Print(cliprdr->log, level, "[%" PRIuz "]: id=0x%08" PRIx32 " [%s|%s]", x,
-			           format->formatId, ClipboardGetFormatIdString(format->formatId),
-			           format->formatName);
-		}
+		const UINT32 mask = freerdp_settings_get_uint32(context->rdpcontext->settings,
+		                                                FreeRDP_ClipboardFeatureMask);
+		filteredFormatList = cliprdr_filter_format_list(
+		    &formatList, mask, CLIPRDR_FLAG_REMOTE_TO_LOCAL | CLIPRDR_FLAG_REMOTE_TO_LOCAL_FILES);
+	}
 
-		WLog_Print(cliprdr->log, level, "ServerFormatList [filtered]: numFormats: %" PRIu32 "",
-		           filteredFormatList.numFormats);
-		for (size_t x = 0; x < filteredFormatList.numFormats; x++)
+	if (filteredFormatList.numFormats != 0)
+	{
+		const DWORD level = WLOG_DEBUG;
+		if (WLog_IsLevelActive(cliprdr->log, level))
 		{
-			const CLIPRDR_FORMAT* format = &filteredFormatList.formats[x];
-			WLog_Print(cliprdr->log, level, "[%" PRIuz "]: id=0x%08" PRIx32 " [%s|%s]", x,
-			           format->formatId, ClipboardGetFormatIdString(format->formatId),
-			           format->formatName);
+			WLog_Print(cliprdr->log, level, "ServerFormatList: numFormats: %" PRIu32 "",
+			           formatList.numFormats);
+			for (size_t x = 0; x < formatList.numFormats; x++)
+			{
+				const CLIPRDR_FORMAT* format = &formatList.formats[x];
+				WLog_Print(cliprdr->log, level, "[%" PRIuz "]: id=0x%08" PRIx32 " [%s|%s]", x,
+				           format->formatId, ClipboardGetFormatIdString(format->formatId),
+				           format->formatName);
+			}
+
+			WLog_Print(cliprdr->log, level, "ServerFormatList [filtered]: numFormats: %" PRIu32 "",
+			           filteredFormatList.numFormats);
+			for (size_t x = 0; x < filteredFormatList.numFormats; x++)
+			{
+				const CLIPRDR_FORMAT* format = &filteredFormatList.formats[x];
+				WLog_Print(cliprdr->log, level, "[%" PRIuz "]: id=0x%08" PRIx32 " [%s|%s]", x,
+				           format->formatId, ClipboardGetFormatIdString(format->formatId),
+				           format->formatName);
+			}
 		}
 	}
 
@@ -177,7 +188,7 @@ error_out:
 UINT cliprdr_process_format_list_response(cliprdrPlugin* cliprdr, WINPR_ATTR_UNUSED wStream* s,
                                           UINT32 dataLen, UINT16 msgFlags)
 {
-	CLIPRDR_FORMAT_LIST_RESPONSE formatListResponse = { 0 };
+	CLIPRDR_FORMAT_LIST_RESPONSE formatListResponse = WINPR_C_ARRAY_INIT;
 	CliprdrClientContext* context = cliprdr_get_client_interface(cliprdr);
 	UINT error = CHANNEL_RC_OK;
 
@@ -203,7 +214,7 @@ UINT cliprdr_process_format_list_response(cliprdrPlugin* cliprdr, WINPR_ATTR_UNU
 UINT cliprdr_process_format_data_request(cliprdrPlugin* cliprdr, wStream* s, UINT32 dataLen,
                                          UINT16 msgFlags)
 {
-	CLIPRDR_FORMAT_DATA_REQUEST formatDataRequest = { 0 };
+	CLIPRDR_FORMAT_DATA_REQUEST formatDataRequest = WINPR_C_ARRAY_INIT;
 	CliprdrClientContext* context = cliprdr_get_client_interface(cliprdr);
 	UINT error = CHANNEL_RC_OK;
 
@@ -242,7 +253,7 @@ UINT cliprdr_process_format_data_request(cliprdrPlugin* cliprdr, wStream* s, UIN
 UINT cliprdr_process_format_data_response(cliprdrPlugin* cliprdr, wStream* s, UINT32 dataLen,
                                           UINT16 msgFlags)
 {
-	CLIPRDR_FORMAT_DATA_RESPONSE formatDataResponse = { 0 };
+	CLIPRDR_FORMAT_DATA_RESPONSE formatDataResponse = WINPR_C_ARRAY_INIT;
 	CliprdrClientContext* context = cliprdr_get_client_interface(cliprdr);
 	UINT error = CHANNEL_RC_OK;
 

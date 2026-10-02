@@ -18,13 +18,18 @@
 #ifndef FREERDP_CLIENT_X11_FLOATBAR_H
 #define FREERDP_CLIENT_X11_FLOATBAR_H
 
-typedef struct xf_floatbar xfFloatbar;
+#include <winpr/wtypes.h>
 
-#include "xfreerdp.h"
+#include <X11/Xlib.h>
+
+#include "xf_types.h"
+
+typedef struct xf_floatbar xfFloatbar;
 
 void xf_floatbar_free(xfFloatbar* floatbar);
 
 WINPR_ATTR_MALLOC(xf_floatbar_free, 1)
+WINPR_ATTR_NODISCARD
 xfFloatbar* xf_floatbar_new(xfContext* xfc, Window window, const char* title, DWORD flags);
 
 BOOL xf_floatbar_is_window(xfFloatbar* floatbar, Window window);

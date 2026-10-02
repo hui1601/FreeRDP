@@ -31,11 +31,11 @@ message("project ${PROJECT_NAME} is using version ${PROJECT_VERSION}")
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/)
 include(ProjectCXXStandard)
 include(CommonConfigOptions)
+include(DetectCXXFilesystem)
 
 include(ConfigureFreeRDP)
 include(CXXCompilerFlags)
 
-option(WITH_DEBUG_SDL_EVENTS "[dangerous, not for release builds!] Debug SDL events" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_SDL_KBD_EVENTS "[dangerous, not for release builds!] Debug SDL keyboard events"
        ${DEFAULT_DEBUG_OPTION}
 )
@@ -43,14 +43,12 @@ option(WITH_WIN_CONSOLE "Build ${PROJECT_NAME} with console support" ON)
 option(WITH_SDL_LINK_SHARED "link SDL dynamic or static" ON)
 
 if(WITH_WIN_CONSOLE)
+  add_compile_definitions("WITH_WIN_CONSOLE")
   set(WIN32_GUI_FLAG "TRUE")
 else()
   set(WIN32_GUI_FLAG "WIN32")
 endif()
 
-if(WITH_DEBUG_SDL_EVENTS)
-  add_compile_definitions(WITH_DEBUG_SDL_EVENTS)
-endif()
 if(WITH_DEBUG_SDL_KBD_EVENTS)
   add_compile_definitions(WITH_DEBUG_SDL_KBD_EVENTS)
 endif()

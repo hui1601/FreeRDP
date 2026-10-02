@@ -39,6 +39,7 @@
 #include <freerdp/channels/channels.h>
 
 #include "pf_client.h"
+#include "pf_server.h"
 #include "pf_channel.h"
 #include <freerdp/server/proxy/proxy_context.h>
 #include "pf_update.h"
@@ -52,6 +53,8 @@
 #define TAG PROXY_TAG("client")
 
 static void channel_data_free(void* obj);
+
+WINPR_ATTR_NODISCARD
 static BOOL proxy_server_reactivate(rdpContext* ps, const rdpContext* pc)
 {
 	WINPR_ASSERT(ps);
@@ -65,21 +68,17 @@ static BOOL proxy_server_reactivate(rdpContext* ps, const rdpContext* pc)
 	 * which causes the reactivation.
 	 */
 	WINPR_ASSERT(ps->update);
-	if (!ps->update->DesktopResize(ps))
-		return FALSE;
-
-	return TRUE;
+	return (ps->update->DesktopResize(ps));
 }
 
 static void pf_client_on_error_info(void* ctx, const ErrorInfoEventArgs* e)
 {
 	pClientContext* pc = (pClientContext*)ctx;
-	pServerContext* ps = NULL;
-
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
 	WINPR_ASSERT(e);
-	ps = pc->pdata->ps;
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
 
 	if (e->code == ERRINFO_NONE)
@@ -90,32 +89,19 @@ static void pf_client_on_error_info(void* ctx, const ErrorInfoEventArgs* e)
 
 	/* forward error back to client */
 	freerdp_set_error_info(ps->context.rdp, e->code);
-	freerdp_send_error_info(ps->context.rdp);
+	if (!freerdp_send_error_info(ps->context.rdp))
+	{
+		PROXY_LOG_WARN(TAG, pc, "[fail] reply ErrorInfo PDU. code=0x%08" PRIu32 ", message: %s",
+		               e->code, freerdp_get_error_info_string(e->code));
+	}
 }
 
-static void pf_client_on_activated(void* ctx, WINPR_ATTR_UNUSED const ActivatedEventArgs* e)
+static void pf_client_on_activated(WINPR_ATTR_UNUSED void* ctx,
+                                   WINPR_ATTR_UNUSED const ActivatedEventArgs* e)
 {
-	pClientContext* pc = (pClientContext*)ctx;
-	pServerContext* ps = NULL;
-	freerdp_peer* peer = NULL;
-
-	WINPR_ASSERT(pc);
-	WINPR_ASSERT(pc->pdata);
-	WINPR_ASSERT(e);
-
-	ps = pc->pdata->ps;
-	WINPR_ASSERT(ps);
-	peer = ps->context.peer;
-	WINPR_ASSERT(peer);
-	WINPR_ASSERT(peer->context);
-
-	PROXY_LOG_INFO(TAG, pc, "client activated, registering server input callbacks");
-
-	/* Register server input/update callbacks only after proxy client is fully activated */
-	pf_server_register_input_callbacks(peer->context->input);
-	pf_server_register_update_callbacks(peer->context->update);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_load_rdpsnd(pClientContext* pc)
 {
 	rdpContext* context = (rdpContext*)pc;
@@ -137,21 +123,19 @@ static BOOL pf_client_load_rdpsnd(pClientContext* pc)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_use_peer_load_balance_info(pClientContext* pc)
 {
-	pServerContext* ps = NULL;
-	rdpSettings* settings = NULL;
-	DWORD lb_info_len = 0;
-	const char* lb_info = NULL;
-
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	ps = pc->pdata->ps;
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
-	settings = pc->context.settings;
+	rdpSettings* settings = pc->cctx.context.settings;
 	WINPR_ASSERT(settings);
 
-	lb_info = freerdp_nego_get_routing_token(&ps->context, &lb_info_len);
+	DWORD lb_info_len = 0;
+	const char* lb_info = freerdp_nego_get_routing_token(&ps->context, &lb_info_len);
 	if (!lb_info)
 		return TRUE;
 
@@ -159,6 +143,7 @@ static BOOL pf_client_use_peer_load_balance_info(pClientContext* pc)
 	                                        lb_info_len);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL str_is_empty(const char* str)
 {
 	if (!str)
@@ -168,6 +153,7 @@ static BOOL str_is_empty(const char* str)
 	return FALSE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_use_proxy_smartcard_auth(const rdpSettings* settings)
 {
 	BOOL enable = freerdp_settings_get_bool(settings, FreeRDP_SmartcardLogon);
@@ -186,23 +172,22 @@ static BOOL pf_client_use_proxy_smartcard_auth(const rdpSettings* settings)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_pre_connect(freerdp* instance)
 {
-	pClientContext* pc = NULL;
-	pServerContext* ps = NULL;
-	const proxyConfig* config = NULL;
-	rdpSettings* settings = NULL;
-
 	WINPR_ASSERT(instance);
-	pc = (pClientContext*)instance->context;
+	pClientContext* pc = (pClientContext*)instance->context;
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	ps = pc->pdata->ps;
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
 	WINPR_ASSERT(ps->pdata);
-	config = ps->pdata->config;
+
+	const proxyConfig* config = ps->pdata->config;
 	WINPR_ASSERT(config);
-	settings = instance->context->settings;
+
+	rdpSettings* settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 
 	/*
@@ -233,8 +218,6 @@ static BOOL pf_client_pre_connect(freerdp* instance)
 	    !freerdp_settings_set_bool(settings, FreeRDP_AudioPlayback, config->AudioOutput) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_DeviceRedirection,
 	                               config->DeviceRedirection) ||
-	    !freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl,
-	                               config->DisplayControl) ||
 	    !freerdp_settings_set_bool(settings, FreeRDP_MultiTouchInput, config->Multitouch))
 		return FALSE;
 
@@ -281,8 +264,10 @@ static BOOL pf_client_pre_connect(freerdp* instance)
 	if (!freerdp_settings_set_bool(settings, FreeRDP_AutoReconnectionEnabled, TRUE))
 		return FALSE;
 
-	PubSub_SubscribeErrorInfo(instance->context->pubSub, pf_client_on_error_info);
-	PubSub_SubscribeActivated(instance->context->pubSub, pf_client_on_activated);
+	if (PubSub_SubscribeErrorInfo(instance->context->pubSub, pf_client_on_error_info) < 0)
+		return FALSE;
+	if (PubSub_SubscribeActivated(instance->context->pubSub, pf_client_on_activated) < 0)
+		return FALSE;
 	if (!pf_client_use_peer_load_balance_info(pc))
 		return FALSE;
 
@@ -297,6 +282,7 @@ typedef struct
 	UINT32 backId;
 } UpdateBackIdArgs;
 
+WINPR_ATTR_NODISCARD
 static BOOL updateBackIdFn(WINPR_ATTR_UNUSED const void* key, void* value, void* arg)
 {
 	pServerStaticChannelContext* current = (pServerStaticChannelContext*)value;
@@ -313,6 +299,7 @@ static BOOL updateBackIdFn(WINPR_ATTR_UNUSED const void* key, void* value, void*
 	return FALSE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_update_back_id(pServerContext* ps, const char* name, UINT32 backId)
 {
 	UpdateBackIdArgs res = { ps, name, backId };
@@ -320,23 +307,23 @@ static BOOL pf_client_update_back_id(pServerContext* ps, const char* name, UINT3
 	return HashTable_Foreach(ps->channelsByFrontId, updateBackIdFn, &res) == FALSE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_load_channels(freerdp* instance)
 {
-	pClientContext* pc = NULL;
-	pServerContext* ps = NULL;
-	const proxyConfig* config = NULL;
-	rdpSettings* settings = NULL;
-
 	WINPR_ASSERT(instance);
-	pc = (pClientContext*)instance->context;
+
+	pClientContext* pc = (pClientContext*)instance->context;
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	ps = pc->pdata->ps;
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
 	WINPR_ASSERT(ps->pdata);
-	config = ps->pdata->config;
+
+	const proxyConfig* config = ps->pdata->config;
 	WINPR_ASSERT(config);
-	settings = instance->context->settings;
+
+	rdpSettings* settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 	/**
 	 * Load all required plugins / channels / libraries specified by current
@@ -383,7 +370,7 @@ static BOOL pf_client_load_channels(freerdp* instance)
 			for (; x < size;)
 			{
 				CHANNEL_DEF* cur = &channels[x];
-				proxyChannelDataEventInfo dev = { 0 };
+				proxyChannelDataEventInfo dev = WINPR_C_ARRAY_INIT;
 
 				dev.channel_name = cur->name;
 				dev.flags = cur->options;
@@ -415,30 +402,28 @@ static BOOL pf_client_load_channels(freerdp* instance)
 	return pf_modules_run_hook(pc->pdata->module, HOOK_TYPE_CLIENT_LOAD_CHANNELS, pc->pdata, pc);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_receive_channel_data_hook(freerdp* instance, UINT16 channelId,
                                                 const BYTE* xdata, size_t xsize, UINT32 flags,
                                                 size_t totalSize)
 {
-	pClientContext* pc = NULL;
-	pServerContext* ps = NULL;
-	proxyData* pdata = NULL;
-	pServerStaticChannelContext* channel = NULL;
 	UINT64 channelId64 = channelId;
 
 	WINPR_ASSERT(instance);
 	WINPR_ASSERT(xdata || (xsize == 0));
 
-	pc = (pClientContext*)instance->context;
+	pClientContext* pc = (pClientContext*)instance->context;
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
 
-	ps = pc->pdata->ps;
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
 
-	pdata = ps->pdata;
+	proxyData* pdata = ps->pdata;
 	WINPR_ASSERT(pdata);
 
-	channel = HashTable_GetItemValue(ps->channelsByBackId, &channelId64);
+	pServerStaticChannelContext* channel =
+	    HashTable_GetItemValue(ps->channelsByBackId, &channelId64);
 	if (!channel)
 		return TRUE;
 
@@ -463,21 +448,21 @@ static BOOL pf_client_receive_channel_data_hook(freerdp* instance, UINT16 channe
 	}
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_on_server_heartbeat(freerdp* instance, BYTE period, BYTE count1, BYTE count2)
 {
-	pClientContext* pc = NULL;
-	pServerContext* ps = NULL;
-
 	WINPR_ASSERT(instance);
-	pc = (pClientContext*)instance->context;
+	pClientContext* pc = (pClientContext*)instance->context;
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	ps = pc->pdata->ps;
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
 
 	return freerdp_heartbeat_send_heartbeat_pdu(ps->context.peer, period, count1, count2);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_send_channel_data(pClientContext* pc, const proxyChannelDataEventInfo* ev)
 {
 	WINPR_ASSERT(pc);
@@ -486,6 +471,7 @@ static BOOL pf_client_send_channel_data(pClientContext* pc, const proxyChannelDa
 	return Queue_Enqueue(pc->cached_server_channel_data, ev);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL sendQueuedChannelData(pClientContext* pc)
 {
 	BOOL rc = TRUE;
@@ -494,24 +480,25 @@ static BOOL sendQueuedChannelData(pClientContext* pc)
 
 	if (pc->connected)
 	{
-		proxyChannelDataEventInfo* ev = NULL;
+		proxyChannelDataEventInfo* ev = nullptr;
 
 		Queue_Lock(pc->cached_server_channel_data);
 		while (rc && (ev = Queue_Dequeue(pc->cached_server_channel_data)))
 		{
 			UINT16 channelId = 0;
-			WINPR_ASSERT(pc->context.instance);
+			WINPR_ASSERT(pc->cctx.context.instance);
 
-			channelId = freerdp_channels_get_id_by_name(pc->context.instance, ev->channel_name);
+			channelId =
+			    freerdp_channels_get_id_by_name(pc->cctx.context.instance, ev->channel_name);
 			/* Ignore unmappable channels */
 			if ((channelId == 0) || (channelId == UINT16_MAX))
 				rc = TRUE;
 			else
 			{
-				WINPR_ASSERT(pc->context.instance->SendChannelPacket);
-				rc = pc->context.instance->SendChannelPacket(pc->context.instance, channelId,
-				                                             ev->total_size, ev->flags, ev->data,
-				                                             ev->data_len);
+				WINPR_ASSERT(pc->cctx.context.instance->SendChannelPacket);
+				rc = pc->cctx.context.instance->SendChannelPacket(
+				    pc->cctx.context.instance, channelId, ev->total_size, ev->flags, ev->data,
+				    ev->data_len);
 			}
 			channel_data_free(ev);
 		}
@@ -531,6 +518,7 @@ static BOOL sendQueuedChannelData(pClientContext* pc)
  * If required, register pointer callbacks to change the local mouse cursor
  * when hovering over the RDP window
  */
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_post_connect(freerdp* instance)
 {
 	WINPR_ASSERT(instance);
@@ -541,7 +529,8 @@ static BOOL pf_client_post_connect(freerdp* instance)
 	pClientContext* pc = (pClientContext*)context;
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	rdpContext* ps = (rdpContext*)pc->pdata->ps;
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
 	WINPR_ASSERT(ps);
 
 	if (!pf_modules_run_hook(pc->pdata->module, HOOK_TYPE_CLIENT_POST_CONNECT, pc->pdata, pc))
@@ -563,14 +552,15 @@ static BOOL pf_client_post_connect(freerdp* instance)
 	pc->connected = TRUE;
 
 	/* Send cached channel data */
-	sendQueuedChannelData(pc);
+	if (!sendQueuedChannelData(pc))
+		return FALSE;
 
 	/*
 	 * after the connection fully established and settings were negotiated with target server,
 	 * send a reactivation sequence to the client with the negotiated settings. This way,
 	 * settings are synchorinized between proxy's peer and and remote target.
 	 */
-	return proxy_server_reactivate(ps, context);
+	return proxy_server_reactivate(&ps->context, context);
 }
 
 /* This function is called whether a session ends by failure or success.
@@ -578,8 +568,8 @@ static BOOL pf_client_post_connect(freerdp* instance)
  */
 static void pf_client_post_disconnect(freerdp* instance)
 {
-	pClientContext* pc = NULL;
-	proxyData* pdata = NULL;
+	pClientContext* pc = nullptr;
+	proxyData* pdata = nullptr;
 
 	if (!instance)
 		return;
@@ -599,7 +589,7 @@ static void pf_client_post_disconnect(freerdp* instance)
 	pf_channel_rdpdr_client_free(pc);
 
 	pc->connected = FALSE;
-	pf_modules_run_hook(pc->pdata->module, HOOK_TYPE_CLIENT_POST_DISCONNECT, pc->pdata, pc);
+	(void)pf_modules_run_hook(pc->pdata->module, HOOK_TYPE_CLIENT_POST_DISCONNECT, pc->pdata, pc);
 
 	PubSub_UnsubscribeErrorInfo(instance->context->pubSub, pf_client_on_error_info);
 	gdi_free(instance);
@@ -609,6 +599,7 @@ static void pf_client_post_disconnect(freerdp* instance)
 		proxy_data_abort_connect(pdata);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_redirect(freerdp* instance)
 {
 	if (!instance)
@@ -634,30 +625,33 @@ static BOOL pf_client_redirect(freerdp* instance)
  * returns TRUE if in case of connection failure, the client should try again without NLA.
  * Otherwise, returns FALSE.
  */
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_should_retry_without_nla(pClientContext* pc)
 {
-	rdpSettings* settings = NULL;
-	const proxyConfig* config = NULL;
+	rdpSettings* settings = nullptr;
+	const proxyConfig* config = nullptr;
 
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	settings = pc->context.settings;
+	settings = pc->cctx.context.settings;
 	WINPR_ASSERT(settings);
 	config = pc->pdata->config;
 	WINPR_ASSERT(config);
 
 	if (!config->ClientAllowFallbackToTls ||
-	    !freerdp_settings_get_bool(settings, FreeRDP_NlaSecurity))
+	    (!freerdp_settings_get_bool(settings, FreeRDP_NlaSecurity) &&
+	     !freerdp_settings_get_bool(settings, FreeRDP_ExtSecurity)))
 		return FALSE;
 
 	return config->ClientTlsSecurity || config->ClientRdpSecurity;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_set_security_settings(pClientContext* pc)
 {
 	WINPR_ASSERT(pc);
 	WINPR_ASSERT(pc->pdata);
-	rdpSettings* settings = pc->context.settings;
+	rdpSettings* settings = pc->cctx.context.settings;
 	WINPR_ASSERT(settings);
 	const proxyConfig* config = pc->pdata->config;
 	WINPR_ASSERT(config);
@@ -668,6 +662,8 @@ static BOOL pf_client_set_security_settings(pClientContext* pc)
 		return FALSE;
 	if (!freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, config->ClientNlaSecurity))
 		return FALSE;
+	if (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, config->ClientExtSecurity))
+		return FALSE;
 
 	if (pf_client_use_proxy_smartcard_auth(settings))
 	{
@@ -676,36 +672,40 @@ static BOOL pf_client_set_security_settings(pClientContext* pc)
 			return FALSE;
 
 		/* Reset username/domain, we will get that info later from the sc cert */
-		if (!freerdp_settings_set_string(settings, FreeRDP_Username, NULL))
+		if (!freerdp_settings_set_string(settings, FreeRDP_Username, nullptr))
 			return FALSE;
-		if (!freerdp_settings_set_string(settings, FreeRDP_Domain, NULL))
+		if (!freerdp_settings_set_string(settings, FreeRDP_Domain, nullptr))
 			return FALSE;
 	}
 
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_connect_without_nla(pClientContext* pc)
 {
-	freerdp* instance = NULL;
-	rdpSettings* settings = NULL;
+	freerdp* instance = nullptr;
+	rdpSettings* settings = nullptr;
 
 	WINPR_ASSERT(pc);
-	instance = pc->context.instance;
+	instance = pc->cctx.context.instance;
 	WINPR_ASSERT(instance);
 
 	if (!freerdp_context_reset(instance))
 		return FALSE;
 
-	settings = pc->context.settings;
+	settings = pc->cctx.context.settings;
 	WINPR_ASSERT(settings);
 
 	/* If already disabled abort early. */
-	if (!freerdp_settings_get_bool(settings, FreeRDP_NlaSecurity))
+	if (!freerdp_settings_get_bool(settings, FreeRDP_NlaSecurity) &&
+	    !freerdp_settings_get_bool(settings, FreeRDP_ExtSecurity))
 		return FALSE;
 
 	/* disable NLA */
 	if (!freerdp_settings_set_bool(settings, FreeRDP_NlaSecurity, FALSE))
+		return FALSE;
+	if (!freerdp_settings_set_bool(settings, FreeRDP_ExtSecurity, FALSE))
 		return FALSE;
 
 	/* do not allow next connection failure */
@@ -713,10 +713,11 @@ static BOOL pf_client_connect_without_nla(pClientContext* pc)
 	return freerdp_connect(instance);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_connect(freerdp* instance)
 {
-	pClientContext* pc = NULL;
-	rdpSettings* settings = NULL;
+	pClientContext* pc = nullptr;
+	rdpSettings* settings = nullptr;
 	BOOL rc = FALSE;
 	BOOL retry = FALSE;
 
@@ -726,20 +727,20 @@ static BOOL pf_client_connect(freerdp* instance)
 	settings = instance->context->settings;
 	WINPR_ASSERT(settings);
 
-	PROXY_LOG_INFO(TAG, pc, "connecting using client info: Username: %s, Domain: %s",
-	               freerdp_settings_get_string(settings, FreeRDP_Username),
-	               freerdp_settings_get_string(settings, FreeRDP_Domain));
-
 	if (!pf_client_set_security_settings(pc))
 		return FALSE;
 
 	if (pf_client_should_retry_without_nla(pc))
 		retry = pc->allow_next_conn_failure = TRUE;
 
-	PROXY_LOG_INFO(TAG, pc, "connecting using security settings: rdp=%d, tls=%d, nla=%d",
+	PROXY_LOG_INFO(TAG, pc, "connecting using client info: Username: %s, Domain: %s",
+	               freerdp_settings_get_string(settings, FreeRDP_Username),
+	               freerdp_settings_get_string(settings, FreeRDP_Domain));
+	PROXY_LOG_INFO(TAG, pc, "connecting using security settings: rdp=%d, tls=%d, nla=%d, ext=%d",
 	               freerdp_settings_get_bool(settings, FreeRDP_RdpSecurity),
 	               freerdp_settings_get_bool(settings, FreeRDP_TlsSecurity),
-	               freerdp_settings_get_bool(settings, FreeRDP_NlaSecurity));
+	               freerdp_settings_get_bool(settings, FreeRDP_NlaSecurity),
+	               freerdp_settings_get_bool(settings, FreeRDP_ExtSecurity));
 
 	if (!freerdp_connect(instance))
 	{
@@ -768,17 +769,18 @@ out:
  * Connects RDP, loops while running and handles event and dispatch, cleans up
  * after the connection ends.
  */
+WINPR_ATTR_NODISCARD
 static DWORD WINAPI pf_client_thread_proc(pClientContext* pc)
 {
-	freerdp* instance = NULL;
-	proxyData* pdata = NULL;
+	freerdp* instance = nullptr;
+	proxyData* pdata = nullptr;
 	DWORD nCount = 0;
 	DWORD status = 0;
-	HANDLE handles[MAXIMUM_WAIT_OBJECTS] = { 0 };
+	HANDLE handles[MAXIMUM_WAIT_OBJECTS] = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(pc);
 
-	instance = pc->context.instance;
+	instance = pc->cctx.context.instance;
 	WINPR_ASSERT(instance);
 
 	pdata = pc->pdata;
@@ -841,17 +843,19 @@ static DWORD WINAPI pf_client_thread_proc(pClientContext* pc)
 
 			break;
 		}
-		sendQueuedChannelData(pc);
+		if (!sendQueuedChannelData(pc))
+			break;
 	}
 
 	freerdp_disconnect(instance);
 
 end:
-	pf_modules_run_hook(pdata->module, HOOK_TYPE_CLIENT_UNINIT_CONNECT, pdata, pc);
+	(void)pf_modules_run_hook(pdata->module, HOOK_TYPE_CLIENT_UNINIT_CONNECT, pdata, pc);
 
 	return 0;
 }
 
+WINPR_ATTR_NODISCARD
 static int pf_logon_error_info(freerdp* instance, UINT32 data, UINT32 type)
 {
 	const char* str_data = freerdp_get_logon_error_info_data(data);
@@ -872,7 +876,7 @@ static void pf_client_context_free(freerdp* instance, rdpContext* context)
 	if (!pc)
 		return;
 
-	pc->sendChannelData = NULL;
+	pc->sendChannelData = nullptr;
 	Queue_Free(pc->cached_server_channel_data);
 	Stream_Free(pc->remote_pem, TRUE);
 	free(pc->remote_hostname);
@@ -880,25 +884,162 @@ static void pf_client_context_free(freerdp* instance, rdpContext* context)
 	HashTable_Free(pc->interceptContextMap);
 }
 
+WINPR_ATTR_NODISCARD
+static BOOL pf_client_try_compare_hash(rdpCertificate* cert, const char* hash,
+                                       const char* TargetCertHash, BOOL useSeparator)
+{
+	WINPR_ASSERT(cert);
+	WINPR_ASSERT(TargetCertHash);
+
+	BOOL rc = FALSE;
+	char* got = freerdp_certificate_get_fingerprint_by_hash_ex(cert, hash, useSeparator);
+	if (got)
+		rc = _stricmp(TargetCertHash, got) == 0;
+
+	winpr_zfree(got);
+	return rc;
+}
+
+WINPR_ATTR_NODISCARD
+static int pf_client_verify_pinned(pClientContext* pc, const BYTE* data, size_t length)
+{
+	int rc = 0;
+	WINPR_ASSERT(pc);
+	WINPR_ASSERT(pc->pdata);
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
+	WINPR_ASSERT(ps);
+	WINPR_ASSERT(ps->pdata);
+	const proxyConfig* config = ps->pdata->config;
+	WINPR_ASSERT(config);
+
+	char* copy = strndup((const char*)data, length);
+	if (!copy)
+	{
+		PROXY_LOG_WARN(TAG, pc, "certificate policy PINNED: remote PEM clone failed, deny access");
+		return 0;
+	}
+	rdpCertificate* cert = freerdp_certificate_new_from_pem(copy);
+	winpr_znfree(copy, length);
+	if (!cert)
+	{
+		PROXY_LOG_WARN(TAG, pc,
+		               "certificate policy PINNED: remote PEM parsing failed, deny access");
+		return 0;
+	}
+
+	if (config->TargetCertPEM && (config->TargetCertPEMLength > 0))
+	{
+		rdpCertificate* tcert = freerdp_certificate_new_from_pem(config->TargetCertPEM);
+		if (tcert)
+		{
+			char* remote = freerdp_certificate_get_fingerprint_by_hash(cert, "sha512");
+			char* target = freerdp_certificate_get_fingerprint_by_hash(tcert, "sha512");
+			if (remote && target)
+			{
+				const BOOL match = strcmp(remote, target) == 0;
+				if (!match)
+					PROXY_LOG_WARN(TAG, pc, "certificate policy PINNED: PEM mismatch, deny access");
+				else
+					PROXY_LOG_INFO(TAG, pc, "certificate policy PINNED: PEM matches, allow access");
+				rc = match ? 1 : 0;
+			}
+			else
+			{
+				PROXY_LOG_WARN(TAG, pc,
+				               "certificate policy PINNED: PEM hashing failed (remote=%p, "
+				               "target=%p), deny access",
+				               (void*)remote, (void*)target);
+			}
+			winpr_zfree(remote);
+			winpr_zfree(target);
+
+			freerdp_certificate_free(tcert);
+		}
+		else
+		{
+			PROXY_LOG_WARN(TAG, pc,
+			               "certificate policy PINNED: config PEM parsing failed, deny access");
+		}
+	}
+
+	else if (config->TargetCertHash)
+	{
+		char* str = _strdup(config->TargetCertHash);
+		if (str)
+		{
+			char* hash = strchr(str, ':');
+			if (hash)
+				*hash++ = '\0';
+
+			BOOL success = pf_client_try_compare_hash(cert, str, hash, FALSE);
+			if (!success)
+				success = pf_client_try_compare_hash(cert, str, hash, TRUE);
+			if (success)
+				rc = 1;
+		}
+
+		winpr_zfree(str);
+		if (rc == 1)
+			PROXY_LOG_INFO(TAG, pc, "certificate policy PINNED: hash matches, allow access");
+		else
+			PROXY_LOG_WARN(TAG, pc,
+			               "certificate policy PINNED: certificate hash mismatch, deny access");
+	}
+	else
+	{
+		PROXY_LOG_WARN(TAG, pc,
+		               "certificate policy PINNED: neigter PEM nor HASH set for "
+		               "comparison, deny access");
+	}
+
+	freerdp_certificate_free(cert);
+	return rc;
+}
+
+WINPR_ATTR_NODISCARD
+static int pf_client_verify_by_policy(pClientContext* pc, const BYTE* data, size_t length)
+{
+	WINPR_ASSERT(pc);
+	WINPR_ASSERT(pc->pdata);
+
+	pServerContext* ps = proxy_data_get_server_context(pc->pdata);
+	WINPR_ASSERT(ps);
+	WINPR_ASSERT(ps->pdata);
+	const proxyConfig* config = ps->pdata->config;
+	WINPR_ASSERT(config);
+
+	switch (config->TargetCertPolicy)
+	{
+		case FREERDP_PROXY_CERT_POLICY_PINNED:
+			return pf_client_verify_pinned(pc, data, length);
+		case FREERDP_PROXY_CERT_POLICY_ALLOW:
+			PROXY_LOG_INFO(TAG, pc, "certificate policy ALLOW: allow access");
+			return 1;
+		case FREERDP_PROXY_CERT_POLICY_DENY:
+		default:
+			PROXY_LOG_WARN(TAG, pc, "certificate policy DENY: deny access");
+			return 0;
+	}
+}
+
+WINPR_ATTR_NODISCARD
 static int pf_client_verify_X509_certificate(freerdp* instance, const BYTE* data, size_t length,
                                              const char* hostname, UINT16 port, DWORD flags)
 {
-	pClientContext* pc = NULL;
-
 	WINPR_ASSERT(instance);
 	WINPR_ASSERT(data);
 	WINPR_ASSERT(length > 0);
 	WINPR_ASSERT(hostname);
 
-	pc = (pClientContext*)instance->context;
-	WINPR_ASSERT(pc);
+	pClientContext* pc = (pClientContext*)instance->context;
 
 	if (!Stream_EnsureCapacity(pc->remote_pem, length))
 		return 0;
-	Stream_SetPosition(pc->remote_pem, 0);
+	Stream_ResetPosition(pc->remote_pem);
 
 	free(pc->remote_hostname);
-	pc->remote_hostname = NULL;
+	pc->remote_hostname = nullptr;
 
 	if (length > 0)
 		Stream_Write(pc->remote_pem, data, length);
@@ -909,9 +1050,68 @@ static int pf_client_verify_X509_certificate(freerdp* instance, const BYTE* data
 	pc->remote_flags = flags;
 
 	Stream_SealLength(pc->remote_pem);
-	if (!pf_modules_run_hook(pc->pdata->module, HOOK_TYPE_CLIENT_VERIFY_X509, pc->pdata, pc))
-		return 0;
-	return 1;
+
+	/* Allow modules to override the default target cert policy */
+	if (pf_modules_run_hook(pc->pdata->module, HOOK_TYPE_CLIENT_VERIFY_X509, pc->pdata, pc))
+	{
+		PROXY_LOG_INFO(TAG, pc, "certificate policy: certificate accepted by plugin hook");
+		return 1;
+	}
+
+	return pf_client_verify_by_policy(pc, data, length);
+}
+
+WINPR_ATTR_NODISCARD
+static BOOL pf_client_choose_smartcard(WINPR_ATTR_UNUSED freerdp* instance,
+                                       WINPR_ATTR_UNUSED SmartcardCertInfo** cert_list,
+                                       WINPR_ATTR_UNUSED DWORD count, DWORD* choice,
+                                       WINPR_ATTR_UNUSED BOOL gateway)
+{
+	if (count < 1)
+		return FALSE;
+	*choice = 0;
+	return TRUE;
+}
+
+WINPR_ATTR_NODISCARD
+static BOOL pf_client_authenticate_ex(WINPR_ATTR_UNUSED freerdp* instance,
+                                      WINPR_ATTR_UNUSED char** username,
+                                      WINPR_ATTR_UNUSED char** password,
+                                      WINPR_ATTR_UNUSED char** domain, rdp_auth_reason reason)
+{
+	WINPR_ASSERT(instance);
+	WINPR_ASSERT(username);
+	WINPR_ASSERT(password);
+	WINPR_ASSERT(domain);
+
+	/* Here just return success, if the remote does require some non empty credentials
+	 * then it will fail, otherwise a login prompt will be shown. */
+	switch (reason)
+	{
+		case AUTH_RDSTLS:
+		case AUTH_NLA:
+		case AUTH_TLS:
+		case AUTH_RDP:
+		case AUTH_SMARTCARD_PIN: /* in this case password is pin code */
+		case GW_AUTH_HTTP:
+		case GW_AUTH_RDG:
+		case GW_AUTH_RPC:
+			return TRUE;
+		default:
+			return FALSE;
+	}
+}
+
+WINPR_ATTR_NODISCARD
+static BOOL pf_client_present_gateway_message(WINPR_ATTR_UNUSED freerdp* instance,
+                                              WINPR_ATTR_UNUSED UINT32 type,
+                                              WINPR_ATTR_UNUSED BOOL isDisplayMandatory,
+                                              WINPR_ATTR_UNUSED BOOL isConsentMandatory,
+                                              WINPR_ATTR_UNUSED size_t length,
+                                              WINPR_ATTR_UNUSED const WCHAR* message)
+{
+	WLog_WARN(TAG, "TODO: Implement gateway message forwarding");
+	return TRUE;
 }
 
 void channel_data_free(void* obj)
@@ -933,6 +1133,8 @@ void channel_data_free(void* obj)
 	}
 }
 
+WINPR_ATTR_MALLOC(channel_data_free, 1)
+WINPR_ATTR_NODISCARD
 static void* channel_data_copy(const void* obj)
 {
 	union
@@ -941,7 +1143,7 @@ static void* channel_data_copy(const void* obj)
 		void* pv;
 	} cnv;
 	const proxyChannelDataEventInfo* src = obj;
-	proxyChannelDataEventInfo* dst = NULL;
+	proxyChannelDataEventInfo* dst = nullptr;
 
 	WINPR_ASSERT(src);
 
@@ -966,12 +1168,13 @@ static void* channel_data_copy(const void* obj)
 
 fail:
 	channel_data_free(dst);
-	return NULL;
+	return nullptr;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_client_client_new(freerdp* instance, rdpContext* context)
 {
-	wObject* obj = NULL;
+	wObject* obj = nullptr;
 	pClientContext* pc = (pClientContext*)context;
 
 	if (!instance || !context)
@@ -983,9 +1186,16 @@ static BOOL pf_client_client_new(freerdp* instance, rdpContext* context)
 	instance->PostDisconnect = pf_client_post_disconnect;
 	instance->Redirect = pf_client_redirect;
 	instance->LogonErrorInfo = pf_logon_error_info;
+	instance->GetAccessToken = nullptr;
+	instance->RetryDialog = nullptr;
+	instance->VerifyCertificateEx = nullptr;
+	instance->VerifyChangedCertificateEx = nullptr;
 	instance->VerifyX509Certificate = pf_client_verify_X509_certificate;
+	instance->AuthenticateEx = pf_client_authenticate_ex;
+	instance->ChooseSmartcard = pf_client_choose_smartcard;
+	instance->PresentGatewayMessage = pf_client_present_gateway_message;
 
-	pc->remote_pem = Stream_New(NULL, 4096);
+	pc->remote_pem = Stream_New(nullptr, 4096);
 	if (!pc->remote_pem)
 		return FALSE;
 
@@ -1012,10 +1222,11 @@ static BOOL pf_client_client_new(freerdp* instance, rdpContext* context)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static int pf_client_client_stop(rdpContext* context)
 {
 	pClientContext* pc = (pClientContext*)context;
-	proxyData* pdata = NULL;
+	proxyData* pdata = nullptr;
 
 	WINPR_ASSERT(pc);
 	pdata = pc->pdata;
@@ -1052,8 +1263,8 @@ DWORD WINAPI pf_client_start(LPVOID arg)
 	pClientContext* pc = (pClientContext*)arg;
 
 	WINPR_ASSERT(pc);
-	if (freerdp_client_start(&pc->context) == 0)
+	if (freerdp_client_start(&pc->cctx.context) == 0)
 		rc = pf_client_thread_proc(pc);
-	freerdp_client_stop(&pc->context);
+	freerdp_client_stop(&pc->cctx.context);
 	return rc;
 }

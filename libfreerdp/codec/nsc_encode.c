@@ -61,13 +61,10 @@ static BOOL nsc_write_message(NSC_CONTEXT* WINPR_RESTRICT context, wStream* WINP
 
 static BOOL nsc_context_initialize_encode(NSC_CONTEXT* WINPR_RESTRICT context)
 {
-	UINT32 length = 0;
-	UINT32 tempWidth = 0;
-	UINT32 tempHeight = 0;
-	tempWidth = ROUND_UP_TO(context->width, 8);
-	tempHeight = ROUND_UP_TO(context->height, 2);
+	const UINT32 tempWidth = ROUND_UP_TO(context->width, 8);
+	const UINT32 tempHeight = ROUND_UP_TO(context->height, 2);
 	/* The maximum length a decoded plane can reach in all cases */
-	length = tempWidth * tempHeight + 16;
+	const UINT32 length = tempWidth * tempHeight + 16;
 
 	if (length > context->priv->PlaneBuffersLength)
 	{
@@ -77,7 +74,10 @@ static BOOL nsc_context_initialize_encode(NSC_CONTEXT* WINPR_RESTRICT context)
 			                                          sizeof(BYTE), 32);
 
 			if (!tmp)
-				goto fail;
+			{
+				nsc_context_planebuffers_free(context->priv);
+				return FALSE;
+			}
 
 			context->priv->PlaneBuffers[i] = tmp;
 		}
@@ -101,26 +101,17 @@ static BOOL nsc_context_initialize_encode(NSC_CONTEXT* WINPR_RESTRICT context)
 	}
 
 	return TRUE;
-fail:
-
-	if (length > context->priv->PlaneBuffersLength)
-	{
-		for (int i = 0; i < 5; i++)
-			winpr_aligned_free(context->priv->PlaneBuffers[i]);
-	}
-
-	return FALSE;
 }
 
 static BOOL nsc_encode_argb_to_aycocg(NSC_CONTEXT* WINPR_RESTRICT context,
                                       const BYTE* WINPR_RESTRICT data, UINT32 scanline)
 {
 	size_t y = 0;
-	const BYTE* src = NULL;
-	BYTE* yplane = NULL;
-	BYTE* coplane = NULL;
-	BYTE* cgplane = NULL;
-	BYTE* aplane = NULL;
+	const BYTE* src = nullptr;
+	BYTE* yplane = nullptr;
+	BYTE* coplane = nullptr;
+	BYTE* cgplane = nullptr;
+	BYTE* aplane = nullptr;
 	INT16 r_val = 0;
 	INT16 g_val = 0;
 	INT16 b_val = 0;
@@ -423,7 +414,7 @@ BOOL nsc_write_message(WINPR_ATTR_UNUSED NSC_CONTEXT* WINPR_RESTRICT context,
 	totalPlaneByteCount = message->LumaPlaneByteCount + message->OrangeChromaPlaneByteCount +
 	                      message->GreenChromaPlaneByteCount + message->AlphaPlaneByteCount;
 
-	if (!Stream_EnsureRemainingCapacity(s, 20 + totalPlaneByteCount))
+	if (!Stream_EnsureRemainingCapacity(s, 20ull + totalPlaneByteCount))
 		return FALSE;
 
 	Stream_Write_UINT32(s, message->LumaPlaneByteCount); /* LumaPlaneByteCount (4 bytes) */
@@ -458,10 +449,13 @@ BOOL nsc_compose_message(NSC_CONTEXT* WINPR_RESTRICT context, wStream* WINPR_RES
                          UINT32 scanline)
 {
 	BOOL rc = 0;
-	NSC_MESSAGE message = { 0 };
+	NSC_MESSAGE message = WINPR_C_ARRAY_INIT;
 
 	if (!context || !s || !data)
 		return FALSE;
+
+	if (scanline == 0)
+		scanline = width * FreeRDPGetBytesPerPixel(context->format);
 
 	context->width = WINPR_ASSERTING_INT_CAST(UINT16, width);
 	context->height = WINPR_ASSERTING_INT_CAST(UINT16, height);
@@ -495,6 +489,7 @@ BOOL nsc_compose_message(NSC_CONTEXT* WINPR_RESTRICT context, wStream* WINPR_RES
 	return nsc_write_message(context, s, &message);
 }
 
+#if !defined(WITHOUT_FREERDP_3x_DEPRECATED)
 BOOL nsc_decompose_message(NSC_CONTEXT* WINPR_RESTRICT context, wStream* WINPR_RESTRICT s,
                            BYTE* WINPR_RESTRICT bmpdata, UINT32 x, UINT32 y, UINT32 width,
                            UINT32 height, UINT32 rowstride, UINT32 format, UINT32 flip)
@@ -511,3 +506,4 @@ BOOL nsc_decompose_message(NSC_CONTEXT* WINPR_RESTRICT context, wStream* WINPR_R
 	Stream_Seek(s, size);
 	return TRUE;
 }
+#endif

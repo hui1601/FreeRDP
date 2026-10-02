@@ -72,8 +72,9 @@ static inline pstatus_t avx2_image_copy_bgr24_bgrx32(BYTE* WINPR_RESTRICT pDstDa
 		/* Ensure alignment requirements can be met */
 		for (; x < width; x += 8)
 		{
-			const __m256i* src = (const __m256i*)&srcLine[(x + nXSrc) * srcByte];
-			__m256i* dst = (__m256i*)&dstLine[(x + nXDst) * dstByte];
+			const __m256i* src =
+			    WINPR_PACKED_ALIGN_CAST(const __m256i*, &srcLine[(x + nXSrc) * srcByte]);
+			__m256i* dst = WINPR_PACKED_ALIGN_CAST(__m256i*, &dstLine[(x + nXDst) * dstByte]);
 			const __m256i s0 = _mm256_loadu_si256(src);
 			__m256i s1 = _mm256_shuffle_epi8(s0, smask);
 
@@ -132,8 +133,9 @@ static inline pstatus_t avx2_image_copy_bgrx32_bgrx32(BYTE* WINPR_RESTRICT pDstD
 		int64_t x = 0;
 		for (; x < width; x += 8)
 		{
-			const __m256i* src = (const __m256i*)&srcLine[(x + nXSrc) * srcByte];
-			__m256i* dst = (__m256i*)&dstLine[(x + nXDst) * dstByte];
+			const __m256i* src =
+			    WINPR_PACKED_ALIGN_CAST(const __m256i*, &srcLine[(x + nXSrc) * srcByte]);
+			__m256i* dst = WINPR_PACKED_ALIGN_CAST(__m256i*, &dstLine[(x + nXDst) * dstByte]);
 			const __m256i s0 = _mm256_loadu_si256(src);
 			const __m256i s1 = _mm256_loadu_si256(dst);
 			__m256i d0 = _mm256_blendv_epi8(s1, s0, mask);
@@ -219,7 +221,7 @@ static pstatus_t avx2_image_copy_no_overlap(BYTE* WINPR_RESTRICT pDstData, DWORD
                                             UINT32 nSrcStep, UINT32 nXSrc, UINT32 nYSrc,
                                             const gdiPalette* WINPR_RESTRICT palette, UINT32 flags)
 {
-	const BOOL vSrcVFlip = (flags & FREERDP_FLIP_VERTICAL) ? TRUE : FALSE;
+	const BOOL vSrcVFlip = (flags & FREERDP_FLIP_VERTICAL) != 0;
 	int64_t srcVOffset = 0;
 	int64_t srcVMultiplier = 1;
 	int64_t dstVOffset = 0;

@@ -32,9 +32,10 @@
 
 #define TAG PROXY_TAG("server")
 
-static proxyServer* server = NULL;
+static proxyServer* server = nullptr;
 
 #if defined(_WIN32)
+WINPR_ATTR_NODISCARD
 static const char* strsignal(int signum)
 {
 	switch (signum)
@@ -73,22 +74,27 @@ static void pf_server_register_signal_handlers(void)
 static int usage(const char* app)
 {
 	printf("Usage:\n");
-	printf("%s -h                               Display this help text.\n", app);
-	printf("%s --help                           Display this help text.\n", app);
-	printf("%s --buildconfig                    Print the build configuration.\n", app);
-	printf("%s <config ini file>                Start the proxy with <config.ini>\n", app);
-	printf("%s --dump-config <config ini file>  Create a template <config.ini>\n", app);
-	printf("%s -v                               Print out binary version.\n", app);
-	printf("%s --version                        Print out binary version.\n", app);
+	printf("%s -h                                  Display this help text.\n", app);
+	printf("%s --help                              Display this help text.\n", app);
+	printf("%s --buildconfig                       Print the build configuration.\n", app);
+	printf("%s <config ini file>                   Start the proxy with <config.ini>\n", app);
+	printf("%s --dump-config [<config ini file>|stdout|stderr] Create a template <config.ini> or "
+	       "print to "
+	       "stdout/stderr.\n",
+	       app);
+	printf("%s -v                                  Print out binary version.\n", app);
+	printf("%s --version                           Print out binary version.\n", app);
 	return 0;
 }
 
+WINPR_ATTR_NODISCARD
 static int version(const char* app)
 {
 	printf("%s version %s", app, freerdp_get_version_string());
 	return 0;
 }
 
+WINPR_ATTR_NODISCARD
 static int buildconfig(WINPR_ATTR_UNUSED const char* app)
 {
 	printf("This is FreeRDP version %s (%s)\n", FREERDP_VERSION_FULL, FREERDP_GIT_REVISION);
@@ -113,59 +119,64 @@ int main(int argc, char* argv[])
 		goto fail;
 	}
 
-	const char* arg = argv[1];
-
-	if (_stricmp(arg, "-h") == 0)
 	{
-		status = usage(argv[0]);
-		goto fail;
-	}
-	else if (_stricmp(arg, "--help") == 0)
-	{
-		status = usage(argv[0]);
-		goto fail;
-	}
-	else if (_stricmp(arg, "--buildconfig") == 0)
-	{
-		status = buildconfig(argv[0]);
-		goto fail;
-	}
-	else if (_stricmp(arg, "--dump-config") == 0)
-	{
-		if (argc != 3)
+		const char* arg = argv[1];
+		if (_stricmp(arg, "-h") == 0)
 		{
 			status = usage(argv[0]);
 			goto fail;
 		}
-		status = pf_server_config_dump(argv[2]) ? 0 : -1;
-		goto fail;
+		else if (_stricmp(arg, "--help") == 0)
+		{
+			status = usage(argv[0]);
+			goto fail;
+		}
+		else if (_stricmp(arg, "--buildconfig") == 0)
+		{
+			status = buildconfig(argv[0]);
+			goto fail;
+		}
+		else if (_stricmp(arg, "--dump-config") == 0)
+		{
+			if (argc != 3)
+			{
+				status = usage(argv[0]);
+				goto fail;
+			}
+			status = pf_server_config_dump(argv[2]) ? 0 : -1;
+			goto fail;
+		}
+		else if (_stricmp(arg, "-v") == 0)
+		{
+			status = version(argv[0]);
+			goto fail;
+		}
+		else if (_stricmp(arg, "--version") == 0)
+		{
+			status = version(argv[0]);
+			goto fail;
+		}
 	}
-	else if (_stricmp(arg, "-v") == 0)
+
 	{
-		status = version(argv[0]);
-		goto fail;
+		const char* config_path = argv[1];
+		if (argc != 2)
+		{
+			status = usage(argv[0]);
+			goto fail;
+		}
+
+		{
+			proxyConfig* config = pf_server_config_load_file(config_path);
+			if (!config)
+				goto fail;
+
+			pf_server_config_print(config);
+
+			server = pf_server_new(config);
+			pf_server_config_free(config);
+		}
 	}
-	else if (_stricmp(arg, "--version") == 0)
-	{
-		status = version(argv[0]);
-		goto fail;
-	}
-
-	const char* config_path = argv[1];
-	if (argc != 2)
-	{
-		status = usage(argv[0]);
-		goto fail;
-	}
-
-	proxyConfig* config = pf_server_config_load_file(config_path);
-	if (!config)
-		goto fail;
-
-	pf_server_config_print(config);
-
-	server = pf_server_new(config);
-	pf_server_config_free(config);
 
 	if (!server)
 		goto fail;

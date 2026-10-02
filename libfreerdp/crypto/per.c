@@ -31,7 +31,7 @@
  * Read PER length.
  *
  * @param s stream to read from
- * @param length A pointer to return the length read, must not be NULL
+ * @param length A pointer to return the length read, must not be nullptr
  *
  * @return \b TRUE for success, \b FALSE otherwise.
  */
@@ -298,7 +298,7 @@ BOOL per_write_integer(wStream* s, UINT32 integer)
  * Read PER INTEGER (UINT16).
  *
  * @param s The stream to read from
- * @param integer The integer result variable pointer, must not be NULL
+ * @param integer The integer result variable pointer, must not be nullptr
  * @param min minimum value
  *
  * @return \b TRUE for success, \b FALSE otherwise
@@ -313,8 +313,7 @@ BOOL per_read_integer16(wStream* s, UINT16* integer, UINT16 min)
 
 	if (*integer > UINT16_MAX - min)
 	{
-		WLog_WARN(TAG, "PER uint16 invalid value %" PRIu16 " > %" PRIu16, *integer,
-		          UINT16_MAX - min);
+		WLog_WARN(TAG, "PER uint16 invalid value %" PRIu16 " > %d", *integer, UINT16_MAX - min);
 		return FALSE;
 	}
 
@@ -346,7 +345,7 @@ BOOL per_write_integer16(wStream* s, UINT16 integer, UINT16 min)
  * Read PER ENUMERATED.
  *
  * @param s The stream to read from
- * @param enumerated enumerated result variable, must not be NULL
+ * @param enumerated enumerated result variable, must not be nullptr
  * @param count enumeration count
  *
  * @return \b TRUE for success, \b FALSE otherwise
@@ -420,7 +419,7 @@ BOOL per_read_object_identifier(wStream* s, const BYTE oid[6])
 {
 	BYTE t12 = 0;
 	UINT16 length = 0;
-	BYTE a_oid[6] = { 0 };
+	BYTE a_oid[6] = WINPR_C_ARRAY_INIT;
 
 	if (!per_read_length(s, &length))
 		return FALSE;
@@ -489,7 +488,7 @@ BOOL per_read_octet_string(wStream* s, const BYTE* oct_str, UINT16 length, UINT1
 
 	if (mlength + min != length)
 	{
-		WLog_ERR(TAG, "length mismatch: %" PRIu16 "!= %" PRIu16, mlength + min, length);
+		WLog_ERR(TAG, "length mismatch: %d!= %" PRIu16, mlength + min, length);
 		return FALSE;
 	}
 

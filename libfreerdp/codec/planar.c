@@ -226,7 +226,7 @@ static inline INT32 planar_skip_plane_rle(const BYTE* WINPR_RESTRICT pSrcData, U
 
 			if (used > SrcSize)
 			{
-				WLog_ERR(TAG, "planar plane used %" PRIu32 " exceeds SrcSize %" PRIu32, used,
+				WLog_ERR(TAG, "planar plane used %" PRIu32 " exceeds SrcSize %" PRId32, used,
 				         INT32_MAX);
 				return -1;
 			}
@@ -246,11 +246,25 @@ static inline UINT8 clamp(INT16 val)
 	return (UINT8)val;
 }
 
+static inline bool check_source_available(const BYTE* buffer, size_t length, const BYTE* cur,
+                                          size_t required)
+{
+	WINPR_ASSERT(cur >= buffer);
+	const size_t len = WINPR_ASSERTING_INT_CAST(size_t, (cur - buffer));
+
+	if ((SIZE_MAX - len < required) || (len + required > length))
+	{
+		WLog_ERR(TAG, "error reading input buffer");
+		return false;
+	}
+	return true;
+}
+
 static inline INT32 planar_decompress_plane_rle_only(const BYTE* WINPR_RESTRICT pSrcData,
                                                      UINT32 SrcSize, BYTE* WINPR_RESTRICT pDstData,
                                                      UINT32 nWidth, UINT32 nHeight)
 {
-	BYTE* previousScanline = NULL;
+	BYTE* previousScanline = nullptr;
 	const BYTE* srcp = pSrcData;
 
 	WINPR_ASSERT(nHeight <= INT32_MAX);
@@ -264,14 +278,10 @@ static inline INT32 planar_decompress_plane_rle_only(const BYTE* WINPR_RESTRICT 
 
 		for (UINT32 x = 0; x < nWidth;)
 		{
-			BYTE controlByte = *srcp;
-			srcp++;
-
-			if ((srcp - pSrcData) > SrcSize * 1ll)
-			{
-				WLog_ERR(TAG, "error reading input buffer");
+			if (!check_source_available(pSrcData, SrcSize, srcp, 1))
 				return -1;
-			}
+
+			const BYTE controlByte = *srcp++;
 
 			UINT32 nRunLength = PLANAR_CONTROL_BYTE_RUN_LENGTH(controlByte);
 			UINT32 cRawBytes = PLANAR_CONTROL_BYTE_RAW_BYTES(controlByte);
@@ -295,11 +305,12 @@ static inline INT32 planar_decompress_plane_rle_only(const BYTE* WINPR_RESTRICT 
 
 			if (!previousScanline)
 			{
+				if (!check_source_available(pSrcData, SrcSize, srcp, cRawBytes))
+					return -1;
 				/* first scanline, absolute values */
 				while (cRawBytes > 0)
 				{
-					pixel = *srcp;
-					srcp++;
+					pixel = *srcp++;
 					*dstp = clamp(pixel);
 					dstp++;
 					x++;
@@ -316,11 +327,13 @@ static inline INT32 planar_decompress_plane_rle_only(const BYTE* WINPR_RESTRICT 
 			}
 			else
 			{
+				if (!check_source_available(pSrcData, SrcSize, srcp, cRawBytes))
+					return -1;
+
 				/* delta values relative to previous scanline */
 				while (cRawBytes > 0)
 				{
-					UINT8 deltaValue = *srcp;
-					srcp++;
+					UINT8 deltaValue = *srcp++;
 
 					if (deltaValue & 1)
 					{
@@ -368,7 +381,7 @@ static inline INT32 planar_decompress_plane_rle(const BYTE* WINPR_RESTRICT pSrcD
 	INT32 beg = 0;
 	INT32 end = 0;
 	INT32 inc = 0;
-	BYTE* previousScanline = NULL;
+	BYTE* previousScanline = nullptr;
 	const BYTE* srcp = pSrcData;
 
 	WINPR_ASSERT(nHeight <= INT32_MAX);
@@ -397,14 +410,10 @@ static inline INT32 planar_decompress_plane_rle(const BYTE* WINPR_RESTRICT pSrcD
 
 		for (INT32 x = 0; x < (INT32)nWidth;)
 		{
-			const BYTE controlByte = *srcp;
-			srcp++;
-
-			if ((srcp - pSrcData) > SrcSize * 1ll)
-			{
-				WLog_ERR(TAG, "error reading input buffer");
+			if (!check_source_available(pSrcData, SrcSize, srcp, 1))
 				return -1;
-			}
+
+			const BYTE controlByte = *srcp++;
 
 			UINT32 nRunLength = PLANAR_CONTROL_BYTE_RUN_LENGTH(controlByte);
 			UINT32 cRawBytes = PLANAR_CONTROL_BYTE_RAW_BYTES(controlByte);
@@ -428,11 +437,14 @@ static inline INT32 planar_decompress_plane_rle(const BYTE* WINPR_RESTRICT pSrcD
 
 			if (!previousScanline)
 			{
+				if (!check_source_available(pSrcData, SrcSize, srcp, cRawBytes))
+					return -1;
+
 				/* first scanline, absolute values */
 				while (cRawBytes > 0)
 				{
-					pixel = *srcp;
-					srcp++;
+					pixel = *srcp++;
+
 					*dstp = WINPR_ASSERTING_INT_CAST(BYTE, pixel);
 					dstp += 4;
 					x++;
@@ -449,11 +461,13 @@ static inline INT32 planar_decompress_plane_rle(const BYTE* WINPR_RESTRICT pSrcD
 			}
 			else
 			{
+				if (!check_source_available(pSrcData, SrcSize, srcp, cRawBytes))
+					return -1;
+
 				/* delta values relative to previous scanline */
 				while (cRawBytes > 0)
 				{
-					BYTE deltaValue = *srcp;
-					srcp++;
+					BYTE deltaValue = *srcp++;
 
 					if (deltaValue & 1)
 					{
@@ -637,7 +651,7 @@ static inline BOOL planar_decompress_planes_raw(const BYTE* WINPR_RESTRICT pSrcD
 
 	for (INT32 y = beg; y != end; y += inc)
 	{
-		BYTE* pRGB = NULL;
+		BYTE* pRGB = nullptr;
 
 		if (y > WINPR_ASSERTING_INT_CAST(INT64, nHeight))
 		{
@@ -716,10 +730,10 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 	BOOL useAlpha = FALSE;
 	INT32 status = 0;
 	INT32 rleSizes[4] = { 0, 0, 0, 0 };
-	UINT32 rawSizes[4] = { 0 };
-	UINT32 rawWidths[4] = { 0 };
-	UINT32 rawHeights[4] = { 0 };
-	const BYTE* planes[4] = { 0 };
+	UINT32 rawSizes[4] = WINPR_C_ARRAY_INIT;
+	UINT32 rawWidths[4] = WINPR_C_ARRAY_INIT;
+	UINT32 rawHeights[4] = WINPR_C_ARRAY_INIT;
+	const BYTE* planes[4] = WINPR_C_ARRAY_INIT;
 	const UINT32 w = MIN(nSrcWidth, nDstWidth);
 	const UINT32 h = MIN(nSrcHeight, nDstHeight);
 	const primitives_t* prims = primitives_get();
@@ -727,28 +741,43 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 	WINPR_ASSERT(planar);
 	WINPR_ASSERT(prims);
 
+	if (planar->maxWidth < nSrcWidth)
+	{
+		WLog_ERR(TAG, "planar->maxWidth %" PRIu32 " < nSrcWidth %" PRIu32, planar->maxWidth,
+		         nSrcWidth);
+		return FALSE;
+	}
+	if (planar->maxHeight < nSrcHeight)
+	{
+		WLog_ERR(TAG, "planar->maxHeight %" PRIu32 " < nSrcHeight %" PRIu32, planar->maxHeight,
+		         nSrcHeight);
+		return FALSE;
+	}
+
+	const UINT32 bpp = FreeRDPGetBytesPerPixel(DstFormat);
 	if (nDstStep <= 0)
-		nDstStep = nDstWidth * FreeRDPGetBytesPerPixel(DstFormat);
+		nDstStep = nDstWidth * bpp;
 
 	const BYTE* srcp = pSrcData;
 
-	if (!pSrcData)
+	if (!pSrcData || (SrcSize < 1))
 	{
-		WLog_ERR(TAG, "Invalid argument pSrcData=NULL");
+		WLog_ERR(TAG, "Invalid argument pSrcData=%p [size=%" PRIu32 "]",
+		         WINPR_CXX_COMPAT_CAST(const void*, pSrcData), SrcSize);
 		return FALSE;
 	}
 
 	if (!pDstData)
 	{
-		WLog_ERR(TAG, "Invalid argument pDstData=NULL");
+		WLog_ERR(TAG, "Invalid argument pDstData=nullptr");
 		return FALSE;
 	}
 
 	const BYTE FormatHeader = *srcp++;
 	const BYTE cll = (FormatHeader & PLANAR_FORMAT_HEADER_CLL_MASK);
-	const BYTE cs = (FormatHeader & PLANAR_FORMAT_HEADER_CS) ? TRUE : FALSE;
-	const BYTE rle = (FormatHeader & PLANAR_FORMAT_HEADER_RLE) ? TRUE : FALSE;
-	const BYTE alpha = (FormatHeader & PLANAR_FORMAT_HEADER_NA) ? FALSE : TRUE;
+	const BYTE cs = (FormatHeader & PLANAR_FORMAT_HEADER_CS) != 0;
+	const BYTE rle = (FormatHeader & PLANAR_FORMAT_HEADER_RLE) != 0;
+	const BYTE alpha = !(FormatHeader & PLANAR_FORMAT_HEADER_NA);
 
 	DstFormat = planar_invert_format(planar, alpha, DstFormat);
 
@@ -830,8 +859,9 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 
 			if ((planes[2] + rawSizes[2]) > &pSrcData[SrcSize])
 			{
-				WLog_ERR(TAG, "plane size mismatch %p + %" PRIu32 " > %p", planes[2], rawSizes[2],
-				         &pSrcData[SrcSize]);
+				WLog_ERR(TAG, "plane size mismatch %p + %" PRIu32 " > %p",
+				         WINPR_CXX_COMPAT_CAST(const void*, planes[2]), rawSizes[2],
+				         WINPR_CXX_COMPAT_CAST(const void*, &pSrcData[SrcSize]));
 				return FALSE;
 			}
 		}
@@ -839,7 +869,7 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 		{
 			if ((SrcSize - diff) < base)
 			{
-				WLog_ERR(TAG, "plane size mismatch %" PRIu32 " < %" PRIu32, SrcSize - diff, base);
+				WLog_ERR(TAG, "plane size mismatch %" PRIuz " < %" PRIu32, SrcSize - diff, base);
 				return FALSE;
 			}
 
@@ -849,8 +879,9 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 
 			if ((planes[2] + rawSizes[2]) > &pSrcData[SrcSize])
 			{
-				WLog_ERR(TAG, "plane size mismatch %p + %" PRIu32 " > %p", planes[2], rawSizes[2],
-				         &pSrcData[SrcSize]);
+				WLog_ERR(TAG, "plane size mismatch %p + %" PRIu32 " > %p",
+				         WINPR_CXX_COMPAT_CAST(const void*, planes[2]), rawSizes[2],
+				         WINPR_CXX_COMPAT_CAST(const void*, &pSrcData[SrcSize]));
 				return FALSE;
 			}
 		}
@@ -948,6 +979,24 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 		}
 		else /* RLE */
 		{
+			if (nYDst + nSrcHeight > nTotalHeight)
+			{
+				WLog_ERR(TAG,
+				         "planar plane destination Y %" PRIu32 " + height %" PRIu32
+				         " exceeds totalHeight %" PRIu32,
+				         nYDst, nSrcHeight, nTotalHeight);
+				return FALSE;
+			}
+
+			if ((nXDst + nSrcWidth) * bpp > nTempStep)
+			{
+				WLog_ERR(TAG,
+				         "planar plane destination (X %" PRIu32 " + width %" PRIu32
+				         ") * bpp %" PRIu32 " exceeds stride %" PRIu32,
+				         nXDst, nSrcWidth, bpp, nTempStep);
+				return FALSE;
+			}
+
 			status = planar_decompress_plane_rle(
 			    planes[0], WINPR_ASSERTING_INT_CAST(uint32_t, rleSizes[0]), pTempData, nTempStep,
 			    nXDst, nYDst, nSrcWidth, nSrcHeight, 2, vFlip); /* RedPlane */
@@ -991,8 +1040,8 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 		if (pTempData != pDstData)
 		{
 			if (!freerdp_image_copy_no_overlap(pDstData, DstFormat, nDstStep, nXDst, nYDst, w, h,
-			                                   pTempData, TempFormat, nTempStep, nXDst, nYDst, NULL,
-			                                   FREERDP_FLIP_NONE))
+			                                   pTempData, TempFormat, nTempStep, nXDst, nYDst,
+			                                   nullptr, FREERDP_FLIP_NONE))
 			{
 				WLog_ERR(TAG, "planar image copy failed");
 				return FALSE;
@@ -1013,14 +1062,20 @@ BOOL freerdp_bitmap_decompress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT plan
 			TempFormat = PIXEL_FORMAT_BGRX32;
 
 		if (!pTempData)
+		{
+			WLog_ERR(TAG, "pTempData == NULL");
 			return FALSE;
+		}
 
 		if (rle) /* RLE encoded data. Decode and handle it like raw data. */
 		{
-			BYTE* rleBuffer[4] = { 0 };
+			BYTE* rleBuffer[4] = WINPR_C_ARRAY_INIT;
 
 			if (!planar->rlePlanesBuffer)
+			{
+				WLog_ERR(TAG, "planar->rlePlanesBuffer == NULL");
 				return FALSE;
+			}
 
 			rleBuffer[3] = planar->rlePlanesBuffer;  /* AlphaPlane */
 			rleBuffer[0] = rleBuffer[3] + planeSize; /* LumaOrRedPlane */
@@ -1144,7 +1199,7 @@ static inline BOOL freerdp_split_color_planes(BITMAP_PLANAR_CONTEXT* WINPR_RESTR
 				const UINT32 color = FreeRDPReadColor(pixel, format);
 				pixel += FreeRDPGetBytesPerPixel(format);
 				FreeRDPSplitColor(color, format, &planes[1][k], &planes[2][k], &planes[3][k],
-				                  &planes[0][k], NULL);
+				                  &planes[0][k], nullptr);
 				k++;
 			}
 		}
@@ -1162,7 +1217,7 @@ static inline BOOL freerdp_split_color_planes(BITMAP_PLANAR_CONTEXT* WINPR_RESTR
 				const UINT32 color = FreeRDPReadColor(pixel, format);
 				pixel += FreeRDPGetBytesPerPixel(format);
 				FreeRDPSplitColor(color, format, &planes[1][k], &planes[2][k], &planes[3][k],
-				                  &planes[0][k], NULL);
+				                  &planes[0][k], nullptr);
 				k++;
 			}
 		}
@@ -1294,7 +1349,7 @@ static inline UINT32 freerdp_bitmap_planar_encode_rle_bytes(const BYTE* WINPR_RE
 	BYTE symbol = 0;
 	const BYTE* pInput = pInBuffer;
 	BYTE* pOutput = pOutBuffer;
-	const BYTE* pBytes = NULL;
+	const BYTE* pBytes = nullptr;
 	UINT32 cRawBytes = 0;
 	UINT32 nRunLength = 0;
 	UINT32 nBytesWritten = 0;
@@ -1308,7 +1363,7 @@ static inline UINT32 freerdp_bitmap_planar_encode_rle_bytes(const BYTE* WINPR_RE
 		if (!inBufferSize)
 			break;
 
-		const UINT32 bSymbolMatch = (symbol == *pInput) ? TRUE : FALSE;
+		const UINT32 bSymbolMatch = (symbol == *pInput) != 0;
 		symbol = *pInput;
 		pInput++;
 		inBufferSize--;
@@ -1338,7 +1393,7 @@ static inline UINT32 freerdp_bitmap_planar_encode_rle_bytes(const BYTE* WINPR_RE
 		}
 
 		nRunLength += bSymbolMatch;
-		cRawBytes += (!bSymbolMatch) ? TRUE : FALSE;
+		cRawBytes += (!bSymbolMatch) != 0;
 	} while (outBufferSize);
 
 	if (cRawBytes || nRunLength)
@@ -1440,11 +1495,8 @@ static inline BOOL freerdp_bitmap_planar_compress_planes_rle(BYTE* WINPR_RESTRIC
 	/* GreenChromeOrBluePlane */
 	dstSizes[3] = outPlanesSize;
 
-	if (!freerdp_bitmap_planar_compress_plane_rle(inPlanes[3], width, height, outPlanes,
-	                                              &dstSizes[3]))
-		return FALSE;
-
-	return TRUE;
+	return (freerdp_bitmap_planar_compress_plane_rle(inPlanes[3], width, height, outPlanes,
+	                                                 &dstSizes[3]));
 }
 
 BYTE* freerdp_bitmap_planar_delta_encode_plane(const BYTE* WINPR_RESTRICT inPlane, UINT32 width,
@@ -1453,11 +1505,11 @@ BYTE* freerdp_bitmap_planar_delta_encode_plane(const BYTE* WINPR_RESTRICT inPlan
 	if (!outPlane)
 	{
 		if (width * height == 0)
-			return NULL;
+			return nullptr;
 
 		outPlane = (BYTE*)calloc(height, width);
 		if (!outPlane)
-			return NULL;
+			return nullptr;
 	}
 
 	// first line is copied as is
@@ -1505,12 +1557,12 @@ BYTE* freerdp_bitmap_compress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT conte
                                      UINT32* WINPR_RESTRICT pDstSize)
 {
 	UINT32 size = 0;
-	BYTE* dstp = NULL;
-	UINT32 dstSizes[4] = { 0 };
+	BYTE* dstp = nullptr;
+	UINT32 dstSizes[4] = WINPR_C_ARRAY_INIT;
 	BYTE FormatHeader = 0;
 
 	if (!context || !context->rlePlanesBuffer)
-		return NULL;
+		return nullptr;
 
 	if (context->AllowSkipAlpha)
 		FormatHeader |= PLANAR_FORMAT_HEADER_NA;
@@ -1522,18 +1574,18 @@ BYTE* freerdp_bitmap_compress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT conte
 
 	if (!freerdp_split_color_planes(context, data, format, width, height, scanline,
 	                                context->planes))
-		return NULL;
+		return nullptr;
 
 	if (context->AllowRunLengthEncoding)
 	{
 		if (!freerdp_bitmap_planar_delta_encode_planes(context->planes, width, height,
 		                                               context->deltaPlanes))
-			return NULL;
+			return nullptr;
 
 		if (!freerdp_bitmap_planar_compress_planes_rle(context->deltaPlanes, width, height,
 		                                               context->rlePlanesBuffer, dstSizes,
 		                                               context->AllowSkipAlpha))
-			return NULL;
+			return nullptr;
 
 		{
 			uint32_t offset = 0;
@@ -1558,19 +1610,19 @@ BYTE* freerdp_bitmap_compress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT conte
 	if (FormatHeader & PLANAR_FORMAT_HEADER_RLE)
 	{
 		if (!context->AllowRunLengthEncoding)
-			return NULL;
+			return nullptr;
 
-		if (context->rlePlanes[0] == NULL)
-			return NULL;
+		if (context->rlePlanes[0] == nullptr)
+			return nullptr;
 
-		if (context->rlePlanes[1] == NULL)
-			return NULL;
+		if (context->rlePlanes[1] == nullptr)
+			return nullptr;
 
-		if (context->rlePlanes[2] == NULL)
-			return NULL;
+		if (context->rlePlanes[2] == nullptr)
+			return nullptr;
 
-		if (context->rlePlanes[3] == NULL)
-			return NULL;
+		if (context->rlePlanes[3] == nullptr)
+			return nullptr;
 	}
 
 	if (!dstData)
@@ -1596,7 +1648,7 @@ BYTE* freerdp_bitmap_compress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT conte
 		dstData = malloc(size);
 
 		if (!dstData)
-			return NULL;
+			return nullptr;
 
 		*pDstSize = size;
 	}
@@ -1672,7 +1724,7 @@ BYTE* freerdp_bitmap_compress_planar(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT conte
 	if ((diff < 0) || (diff > UINT32_MAX))
 	{
 		free(dstData);
-		return NULL;
+		return nullptr;
 	}
 	size = (UINT32)diff;
 	*pDstSize = size;
@@ -1686,45 +1738,63 @@ BOOL freerdp_bitmap_planar_context_reset(BITMAP_PLANAR_CONTEXT* WINPR_RESTRICT c
 		return FALSE;
 
 	context->bgr = FALSE;
-	context->maxWidth = PLANAR_ALIGN(width, 4);
-	context->maxHeight = PLANAR_ALIGN(height, 4);
+	const UINT32 maxWidth = PLANAR_ALIGN(width, 4);
+	const UINT32 maxHeight = PLANAR_ALIGN(height, 4);
+	UINT32 maxPlaneSize = 0;
 	{
-		const UINT64 tmp = (UINT64)context->maxWidth * context->maxHeight;
+		const UINT64 tmp = 1ull * maxWidth * maxHeight;
 		if (tmp > UINT32_MAX)
 			return FALSE;
-		context->maxPlaneSize = (UINT32)tmp;
+		maxPlaneSize = (UINT32)tmp;
 	}
 
-	if (context->maxWidth > UINT32_MAX / 4)
+	if (maxWidth > UINT32_MAX / 4)
 		return FALSE;
-	context->nTempStep = context->maxWidth * 4;
+	const UINT32 nTempStep = maxWidth * 4ull;
 
 	memset((void*)context->planes, 0, sizeof(context->planes));
 	memset((void*)context->rlePlanes, 0, sizeof(context->rlePlanes));
 	memset((void*)context->deltaPlanes, 0, sizeof(context->deltaPlanes));
 
+	void* tmp1 = nullptr;
+	void* tmp2 = nullptr;
+	void* tmp3 = nullptr;
+	void* tmp4 = nullptr;
+	if (maxPlaneSize > 0)
+	{
+		tmp1 = winpr_aligned_calloc(maxPlaneSize, 4, 32);
+		tmp2 = winpr_aligned_calloc(maxPlaneSize, 6, 32);
+		tmp3 = winpr_aligned_calloc(maxPlaneSize, 4, 32);
+		tmp4 = winpr_aligned_calloc(maxPlaneSize, 4, 32);
+		if (!tmp1 || !tmp2 || !tmp3 || !tmp4)
+		{
+			winpr_aligned_free(tmp1);
+			winpr_aligned_free(tmp2);
+			winpr_aligned_free(tmp3);
+			winpr_aligned_free(tmp4);
+			return FALSE;
+		}
+	}
+
+	winpr_aligned_free(context->planesBuffer);
+	context->planesBuffer = tmp1;
+
+	winpr_aligned_free(context->pTempData);
+	context->pTempData = tmp2;
+
+	winpr_aligned_free(context->deltaPlanesBuffer);
+	context->deltaPlanesBuffer = tmp3;
+
+	winpr_aligned_free(context->rlePlanesBuffer);
+	context->rlePlanesBuffer = tmp4;
+
+	context->maxWidth = maxWidth;
+	context->maxHeight = maxHeight;
+	context->maxPlaneSize = maxPlaneSize;
+	context->nTempStep = nTempStep;
+
 	if (context->maxPlaneSize > 0)
 	{
-		void* tmp = winpr_aligned_recalloc(context->planesBuffer, context->maxPlaneSize, 4, 32);
-		if (!tmp)
-			return FALSE;
-		context->planesBuffer = tmp;
-
-		tmp = winpr_aligned_recalloc(context->pTempData, context->maxPlaneSize, 6, 32);
-		if (!tmp)
-			return FALSE;
-		context->pTempData = tmp;
-
-		tmp = winpr_aligned_recalloc(context->deltaPlanesBuffer, context->maxPlaneSize, 4, 32);
-		if (!tmp)
-			return FALSE;
-		context->deltaPlanesBuffer = tmp;
-
-		tmp = winpr_aligned_recalloc(context->rlePlanesBuffer, context->maxPlaneSize, 4, 32);
-		if (!tmp)
-			return FALSE;
-		context->rlePlanesBuffer = tmp;
-
 		context->planes[0] = &context->planesBuffer[0ULL * context->maxPlaneSize];
 		context->planes[1] = &context->planesBuffer[1ULL * context->maxPlaneSize];
 		context->planes[2] = &context->planesBuffer[2ULL * context->maxPlaneSize];
@@ -1744,7 +1814,7 @@ BITMAP_PLANAR_CONTEXT* freerdp_bitmap_planar_context_new(DWORD flags, UINT32 max
 	    (BITMAP_PLANAR_CONTEXT*)winpr_aligned_calloc(1, sizeof(BITMAP_PLANAR_CONTEXT), 32);
 
 	if (!context)
-		return NULL;
+		return nullptr;
 
 	if (flags & PLANAR_FORMAT_HEADER_NA)
 		context->AllowSkipAlpha = TRUE;
@@ -1766,7 +1836,7 @@ BITMAP_PLANAR_CONTEXT* freerdp_bitmap_planar_context_new(DWORD flags, UINT32 max
 		WINPR_PRAGMA_DIAG_IGNORED_MISMATCHED_DEALLOC
 		freerdp_bitmap_planar_context_free(context);
 		WINPR_PRAGMA_DIAG_POP
-		return NULL;
+		return nullptr;
 	}
 
 	return context;

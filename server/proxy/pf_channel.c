@@ -23,6 +23,8 @@
 
 #include "proxy_modules.h"
 #include "pf_channel.h"
+#include "pf_client.h"
+#include "pf_server.h"
 
 #define TAG PROXY_TAG("channel")
 
@@ -41,6 +43,7 @@ struct sChannelStateTracker
 	proxyData* pdata;
 };
 
+WINPR_ATTR_NODISCARD
 static BOOL channelTracker_resetCurrentPacket(ChannelStateTracker* tracker)
 {
 	WINPR_ASSERT(tracker);
@@ -56,10 +59,10 @@ static BOOL channelTracker_resetCurrentPacket(ChannelStateTracker* tracker)
 	}
 
 	if (create)
-		tracker->currentPacket = Stream_New(NULL, 10ULL * 1024ULL);
+		tracker->currentPacket = Stream_New(nullptr, 10ULL * 1024ULL);
 	if (!tracker->currentPacket)
 		return FALSE;
-	Stream_SetPosition(tracker->currentPacket, 0);
+	Stream_ResetPosition(tracker->currentPacket);
 	return TRUE;
 }
 
@@ -88,7 +91,7 @@ fail:
 	WINPR_PRAGMA_DIAG_IGNORED_MISMATCHED_DEALLOC
 	channelTracker_free(ret);
 	WINPR_PRAGMA_DIAG_POP
-	return NULL;
+	return nullptr;
 }
 
 PfChannelResult channelTracker_update(ChannelStateTracker* tracker, const BYTE* xdata, size_t xsize,
@@ -105,7 +108,7 @@ PfChannelResult channelTracker_update(ChannelStateTracker* tracker, const BYTE* 
 	if (flags & CHANNEL_FLAG_FIRST)
 	{
 		if (!channelTracker_resetCurrentPacket(tracker))
-			return FALSE;
+			return PF_CHANNEL_RESULT_ERROR;
 		channelTracker_setCurrentPacketSize(tracker, totalSize);
 		tracker->currentPacketReceived = 0;
 		tracker->currentPacketFragments = 0;
@@ -113,13 +116,34 @@ PfChannelResult channelTracker_update(ChannelStateTracker* tracker, const BYTE* 
 
 	{
 		const size_t currentPacketSize = channelTracker_getCurrentPacketSize(tracker);
-		if (tracker->currentPacketReceived + xsize > currentPacketSize)
-			WLog_INFO(TAG, "cumulated size is bigger (%" PRIuz ") than total size (%" PRIuz ")",
-			          tracker->currentPacketReceived + xsize, currentPacketSize);
-	}
+		if ((xsize > currentPacketSize) || (currentPacketSize != totalSize))
+		{
+			WLog_WARN(TAG,
+			          "current fragment size is bigger (%" PRIuz ") than total size (%" PRIuz ")",
+			          xsize, currentPacketSize);
+			return PF_CHANNEL_RESULT_ERROR;
+		}
 
-	tracker->currentPacketReceived += xsize;
-	tracker->currentPacketFragments++;
+		if (xsize > SIZE_MAX - tracker->currentPacketReceived)
+		{
+			WLog_WARN(TAG,
+			          "current fragment size is overflowing size_t (%" PRIuz
+			          ") when added to (%" PRIuz ")",
+			          xsize, tracker->currentPacketReceived);
+			return PF_CHANNEL_RESULT_ERROR;
+		}
+
+		tracker->currentPacketReceived += xsize;
+		tracker->currentPacketFragments++;
+		if (tracker->currentPacketReceived > currentPacketSize)
+		{
+			WLog_WARN(TAG, "cumulated size is bigger (%" PRIuz ") than total size (%" PRIuz ")",
+			          tracker->currentPacketReceived + xsize, currentPacketSize);
+			return PF_CHANNEL_RESULT_ERROR;
+		}
+		else if ((tracker->currentPacketReceived == currentPacketSize) && !lastPacket)
+			return PF_CHANNEL_RESULT_ERROR;
+	}
 
 	switch (channelTracker_getMode(tracker))
 	{
@@ -176,9 +200,6 @@ void channelTracker_free(ChannelStateTracker* t)
 PfChannelResult channelTracker_flushCurrent(ChannelStateTracker* t, BOOL first, BOOL last,
                                             BOOL toBack)
 {
-	proxyData* pdata = NULL;
-	pServerContext* ps = NULL;
-	pServerStaticChannelContext* channel = NULL;
 	UINT32 flags = CHANNEL_FLAG_FIRST;
 	BOOL r = 0;
 	const char* direction = toBack ? "F->B" : "B->F";
@@ -193,14 +214,14 @@ PfChannelResult channelTracker_flushCurrent(ChannelStateTracker* t, BOOL first, 
 	if (first)
 		return PF_CHANNEL_RESULT_PASS;
 
-	pdata = t->pdata;
-	channel = t->channel;
+	proxyData* pdata = t->pdata;
+	pServerStaticChannelContext* channel = t->channel;
 	if (last)
 		flags |= CHANNEL_FLAG_LAST;
 
 	if (toBack)
 	{
-		proxyChannelDataEventInfo ev = { 0 };
+		proxyChannelDataEventInfo ev = WINPR_C_ARRAY_INIT;
 
 		ev.channel_id = WINPR_ASSERTING_INT_CAST(UINT16, channel->front_channel_id);
 		ev.channel_name = channel->channel_name;
@@ -209,14 +230,14 @@ PfChannelResult channelTracker_flushCurrent(ChannelStateTracker* t, BOOL first, 
 		ev.flags = flags;
 		ev.total_size = currentPacketSize;
 
-		if (!pdata->pc->sendChannelData)
+		pClientContext* pc = proxy_data_get_client_context(pdata);
+		if (!pc->sendChannelData)
 			return PF_CHANNEL_RESULT_ERROR;
 
-		return pdata->pc->sendChannelData(pdata->pc, &ev) ? PF_CHANNEL_RESULT_DROP
-		                                                  : PF_CHANNEL_RESULT_ERROR;
+		return pc->sendChannelData(pc, &ev) ? PF_CHANNEL_RESULT_DROP : PF_CHANNEL_RESULT_ERROR;
 	}
 
-	ps = pdata->ps;
+	pServerContext* ps = proxy_data_get_server_context(pdata);
 	r = ps->context.peer->SendChannelPacket(
 	    ps->context.peer, WINPR_ASSERTING_INT_CAST(UINT16, channel->front_channel_id),
 	    currentPacketSize, flags, Stream_Buffer(currentPacket), Stream_GetPosition(currentPacket));
@@ -224,12 +245,13 @@ PfChannelResult channelTracker_flushCurrent(ChannelStateTracker* t, BOOL first, 
 	return r ? PF_CHANNEL_RESULT_DROP : PF_CHANNEL_RESULT_ERROR;
 }
 
+WINPR_ATTR_NODISCARD
 static PfChannelResult pf_channel_generic_back_data(proxyData* pdata,
                                                     const pServerStaticChannelContext* channel,
                                                     const BYTE* xdata, size_t xsize, UINT32 flags,
                                                     size_t totalSize)
 {
-	proxyChannelDataEventInfo ev = { 0 };
+	proxyChannelDataEventInfo ev = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(channel);
@@ -258,12 +280,13 @@ static PfChannelResult pf_channel_generic_back_data(proxyData* pdata,
 	}
 }
 
+WINPR_ATTR_NODISCARD
 static PfChannelResult pf_channel_generic_front_data(proxyData* pdata,
                                                      const pServerStaticChannelContext* channel,
                                                      const BYTE* xdata, size_t xsize, UINT32 flags,
                                                      size_t totalSize)
 {
-	proxyChannelDataEventInfo ev = { 0 };
+	proxyChannelDataEventInfo ev = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(channel);

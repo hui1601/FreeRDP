@@ -29,7 +29,7 @@
 
 static int status = 0;
 
-static LONG* pLoopCount = NULL;
+static LONG* pLoopCount = nullptr;
 static BOOL bStopTest = FALSE;
 
 static UINT32 prand(UINT32 max)
@@ -37,7 +37,12 @@ static UINT32 prand(UINT32 max)
 	UINT32 tmp = 0;
 	if (max <= 1)
 		return 1;
-	winpr_RAND(&tmp, sizeof(tmp));
+	if (winpr_RAND(&tmp, sizeof(tmp)) < 0)
+	{
+		(void)fprintf(stderr, "winpr_RAND failing, retry...\n");
+		// NOLINTNEXTLINE(concurrency-mt-unsafe)
+		exit(-1);
+	}
 	return tmp % (max - 1) + 1;
 }
 
@@ -79,7 +84,8 @@ int TestErrorSetLastError(int argc, char* argv[])
 	/* We must initialize WLog here. It will check for settings
 	 * in the environment and if the variables are not set, the last
 	 * error state is changed... */
-	WLog_GetRoot();
+	if (!WLog_GetRoot())
+		return -1;
 
 	SetLastError(ERROR_ACCESS_DENIED);
 
@@ -92,7 +98,7 @@ int TestErrorSetLastError(int argc, char* argv[])
 		return -1;
 	}
 
-	pLoopCount = winpr_aligned_malloc(sizeof(LONG), sizeof(LONG));
+	pLoopCount = winpr_aligned_calloc(1, sizeof(LONG), sizeof(LONG));
 	if (!pLoopCount)
 	{
 		printf("Unable to allocate memory\n");
@@ -102,7 +108,8 @@ int TestErrorSetLastError(int argc, char* argv[])
 
 	for (int i = 0; i < 4; i++)
 	{
-		if (!(threads[i] = CreateThread(NULL, 0, test_error_thread, (void*)(size_t)0, 0, NULL)))
+		if (!(threads[i] =
+		          CreateThread(nullptr, 0, test_error_thread, (void*)(size_t)0, 0, nullptr)))
 		{
 			printf("Failed to create thread #%d\n", i);
 			return -1;

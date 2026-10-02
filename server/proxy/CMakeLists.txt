@@ -53,7 +53,7 @@ set(PRIVATE_LIBS freerdp-client freerdp-server)
 
 set(PUBLIC_LIBS winpr freerdp)
 
-target_include_directories(${MODULE_NAME} INTERFACE $<INSTALL_INTERFACE:include>)
+target_include_directories(${MODULE_NAME} INTERFACE $<INSTALL_INTERFACE:include/freerdp${FREERDP_VERSION_MAJOR}>)
 target_link_libraries(${MODULE_NAME} PRIVATE ${PRIVATE_LIBS} PUBLIC ${PUBLIC_LIBS})
 
 installwithrpath(
@@ -80,7 +80,9 @@ set_property(TARGET ${MODULE_NAME} PROPERTY FOLDER "Server/Proxy")
 # Do not set Requires.Private if not a static build
 if(NOT BUILD_SHARED_LIBS)
   set(FREERDP_PROXY_PC_REQUIRES_PRIVATE "freerdp-client${FREERDP_API_VERSION} freerdp-server${FREERDP_API_VERSION}")
-  set(FREERDP_PROXY_PC_LIBS_PRIVATE "-ldl -lpthread")
+
+  include(PkgConfigAddThreads)
+  pkg_config_add_threads(FREERDP_PROXY_PC_LIBS_PRIVATE)
 endif()
 set(FREERDP_PROXY_PC_REQUIRES freerdp-server${FREERDP_API_VERSION})
 
@@ -124,4 +126,8 @@ endif()
 option(WITH_PROXY_MODULES "Compile proxy modules" ON)
 if(WITH_PROXY_MODULES)
   add_subdirectory("modules")
+endif()
+
+if(BUILD_TESTING_INTERNAL OR BUILD_TESTING)
+  add_subdirectory(test)
 endif()

@@ -70,7 +70,7 @@ static UINT audin_server_recv_version(audin_server_context* context, wStream* s,
                                       const SNDIN_PDU* header)
 {
 	audin_server* audin = (audin_server*)context;
-	SNDIN_VERSION pdu = { 0 };
+	SNDIN_VERSION pdu = WINPR_C_ARRAY_INIT;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(context);
@@ -81,7 +81,25 @@ static UINT audin_server_recv_version(audin_server_context* context, wStream* s,
 	if (!Stream_CheckAndLogRequiredLengthWLog(audin->log, s, 4))
 		return ERROR_NO_DATA;
 
-	Stream_Read_UINT32(s, pdu.Version);
+	{
+		const UINT32 version = Stream_Get_UINT32(s);
+		switch (version)
+		{
+			case SNDIN_VERSION_Version_1:
+				pdu.Version = SNDIN_VERSION_Version_1;
+				break;
+			case SNDIN_VERSION_Version_2:
+				pdu.Version = SNDIN_VERSION_Version_2;
+				break;
+			default:
+				pdu.Version = SNDIN_VERSION_Version_2;
+				WLog_Print(audin->log, WLOG_WARN,
+				           "Received unsupported channel version %" PRIu32
+				           ", using highest supported version %u",
+				           version, pdu.Version);
+				break;
+		}
+	}
 
 	IFCALLRET(context->ReceiveVersion, error, context, &pdu);
 	if (error)
@@ -95,7 +113,7 @@ static UINT audin_server_recv_formats(audin_server_context* context, wStream* s,
                                       const SNDIN_PDU* header)
 {
 	audin_server* audin = (audin_server*)context;
-	SNDIN_FORMATS pdu = { 0 };
+	SNDIN_FORMATS pdu = WINPR_C_ARRAY_INIT;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(context);
@@ -116,6 +134,19 @@ static UINT audin_server_recv_formats(audin_server_context* context, wStream* s,
 		return ERROR_INVALID_DATA;
 	}
 
+	/* basic sanity check, we need at least pdu.NumFormats * sizeof(AUDIO_FORMAT) bytes of data */
+	if (!Stream_CheckAndLogRequiredCapacityOfSizeWLog(audin->log, s, pdu.NumFormats,
+	                                                  sizeof(AUDIO_FORMAT)))
+		return ERROR_INVALID_DATA;
+
+	if (pdu.NumFormats > 512)
+	{
+		WLog_Print(audin->log, WLOG_ERROR,
+		           "Sound Formats PDU contains %" PRIu32 " formats, implausible so discarding",
+		           pdu.NumFormats);
+		return ERROR_INVALID_DATA;
+	}
+
 	pdu.SoundFormats = audio_formats_new(pdu.NumFormats);
 	if (!pdu.SoundFormats)
 	{
@@ -130,8 +161,8 @@ static UINT audin_server_recv_formats(audin_server_context* context, wStream* s,
 		if (!audio_format_read(s, format))
 		{
 			WLog_Print(audin->log, WLOG_ERROR, "Failed to read audio format");
-			audio_formats_free(pdu.SoundFormats, i + i);
-			return ERROR_INVALID_DATA;
+			error = ERROR_INVALID_DATA;
+			goto fail;
 		}
 
 		audio_format_print(audin->log, WLOG_DEBUG, format);
@@ -170,7 +201,7 @@ static UINT audin_server_recv_open_reply(audin_server_context* context, wStream*
                                          const SNDIN_PDU* header)
 {
 	audin_server* audin = (audin_server*)context;
-	SNDIN_OPEN_REPLY pdu = { 0 };
+	SNDIN_OPEN_REPLY pdu = WINPR_C_ARRAY_INIT;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(context);
@@ -195,7 +226,7 @@ static UINT audin_server_recv_data_incoming(audin_server_context* context,
                                             WINPR_ATTR_UNUSED wStream* s, const SNDIN_PDU* header)
 {
 	audin_server* audin = (audin_server*)context;
-	SNDIN_DATA_INCOMING pdu = { 0 };
+	SNDIN_DATA_INCOMING pdu = WINPR_C_ARRAY_INIT;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(context);
@@ -215,8 +246,8 @@ static UINT audin_server_recv_data(audin_server_context* context, wStream* s,
                                    const SNDIN_PDU* header)
 {
 	audin_server* audin = (audin_server*)context;
-	SNDIN_DATA pdu = { 0 };
-	wStream dataBuffer = { 0 };
+	SNDIN_DATA pdu = WINPR_C_ARRAY_INIT;
+	wStream dataBuffer = WINPR_C_ARRAY_INIT;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(context);
@@ -237,7 +268,7 @@ static UINT audin_server_recv_format_change(audin_server_context* context, wStre
                                             const SNDIN_PDU* header)
 {
 	audin_server* audin = (audin_server*)context;
-	SNDIN_FORMATCHANGE pdu = { 0 };
+	SNDIN_FORMATCHANGE pdu = WINPR_C_ARRAY_INIT;
 	UINT error = CHANNEL_RC_OK;
 
 	WINPR_ASSERT(context);
@@ -260,12 +291,12 @@ static UINT audin_server_recv_format_change(audin_server_context* context, wStre
 
 static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 {
-	wStream* s = NULL;
-	void* buffer = NULL;
+	wStream* s = nullptr;
+	void* buffer = nullptr;
 	DWORD nCount = 0;
-	HANDLE events[8] = { 0 };
+	HANDLE events[8] = WINPR_C_ARRAY_INIT;
 	BOOL ready = FALSE;
-	HANDLE ChannelEvent = NULL;
+	HANDLE ChannelEvent = nullptr;
 	DWORD BytesReturned = 0;
 	audin_server* audin = (audin_server*)arg;
 	UINT error = CHANNEL_RC_OK;
@@ -323,7 +354,7 @@ static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 			break;
 	}
 
-	s = Stream_New(NULL, 4096);
+	s = Stream_New(nullptr, 4096);
 
 	if (!s)
 	{
@@ -334,7 +365,7 @@ static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 
 	if (ready)
 	{
-		SNDIN_VERSION version = { 0 };
+		SNDIN_VERSION version = WINPR_C_ARRAY_INIT;
 
 		version.Version = audin->context.serverVersion;
 
@@ -347,7 +378,7 @@ static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 
 	while (ready)
 	{
-		SNDIN_PDU header = { 0 };
+		SNDIN_PDU header = WINPR_C_ARRAY_INIT;
 
 		if ((status = WaitForMultipleObjects(nCount, events, FALSE, INFINITE)) == WAIT_OBJECT_0)
 			break;
@@ -362,9 +393,9 @@ static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 		if (status == WAIT_OBJECT_0)
 			break;
 
-		Stream_SetPosition(s, 0);
+		Stream_ResetPosition(s);
 
-		if (!WTSVirtualChannelRead(audin->audin_channel, 0, NULL, 0, &BytesReturned))
+		if (!WTSVirtualChannelRead(audin->audin_channel, 0, nullptr, 0, &BytesReturned))
 		{
 			WLog_Print(audin->log, WLOG_ERROR, "WTSVirtualChannelRead failed!");
 			error = ERROR_INTERNAL_ERROR;
@@ -377,16 +408,31 @@ static DWORD WINAPI audin_server_thread_func(LPVOID arg)
 		if (!Stream_EnsureRemainingCapacity(s, BytesReturned))
 			break;
 
-		WINPR_ASSERT(Stream_Capacity(s) <= UINT32_MAX);
-		if (WTSVirtualChannelRead(audin->audin_channel, 0, Stream_BufferAs(s, char),
-		                          (ULONG)Stream_Capacity(s), &BytesReturned) == FALSE)
+		const ULONG len = WINPR_ASSERTING_INT_CAST(ULONG, Stream_Capacity(s));
+		if (WTSVirtualChannelRead(audin->audin_channel, 0, Stream_BufferAs(s, char), len,
+		                          &BytesReturned) == FALSE)
 		{
 			WLog_Print(audin->log, WLOG_ERROR, "WTSVirtualChannelRead failed!");
 			error = ERROR_INTERNAL_ERROR;
 			break;
 		}
 
-		Stream_SetLength(s, BytesReturned);
+		if (BytesReturned > len)
+		{
+			WLog_Print(audin->log, WLOG_ERROR,
+			           "WTSVirtualChannelRead returned an invalid length, got %" PRIu32
+			           ", but limit is %" PRIu32,
+			           BytesReturned, len);
+			error = ERROR_INTERNAL_ERROR;
+			break;
+		}
+
+		if (!Stream_SetLength(s, BytesReturned))
+		{
+			error = ERROR_INTERNAL_ERROR;
+			break;
+		}
+
 		if (!Stream_CheckAndLogRequiredLengthWLog(audin->log, s, SNDIN_HEADER_SIZE))
 		{
 			error = ERROR_INTERNAL_ERROR;
@@ -430,7 +476,7 @@ out_capacity:
 	Stream_Free(s, TRUE);
 out:
 	(void)WTSVirtualChannelClose(audin->audin_channel);
-	audin->audin_channel = NULL;
+	audin->audin_channel = nullptr;
 
 	if (error && audin->context.rdpcontext)
 		setChannelError(audin->context.rdpcontext, error,
@@ -447,7 +493,7 @@ static BOOL audin_server_open(audin_server_context* context)
 	WINPR_ASSERT(audin);
 	if (!audin->thread)
 	{
-		PULONG pSessionId = NULL;
+		PULONG pSessionId = nullptr;
 		DWORD BytesReturned = 0;
 		audin->SessionId = WTS_CURRENT_SESSION;
 		UINT32 channelId = 0;
@@ -478,18 +524,18 @@ static BOOL audin_server_open(audin_server_context* context)
 			return FALSE;
 		}
 
-		if (!(audin->stopEvent = CreateEvent(NULL, TRUE, FALSE, NULL)))
+		if (!(audin->stopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr)))
 		{
 			WLog_Print(audin->log, WLOG_ERROR, "CreateEvent failed!");
 			return FALSE;
 		}
 
 		if (!(audin->thread =
-		          CreateThread(NULL, 0, audin_server_thread_func, (void*)audin, 0, NULL)))
+		          CreateThread(nullptr, 0, audin_server_thread_func, (void*)audin, 0, nullptr)))
 		{
 			WLog_Print(audin->log, WLOG_ERROR, "CreateThread failed!");
 			(void)CloseHandle(audin->stopEvent);
-			audin->stopEvent = NULL;
+			audin->stopEvent = nullptr;
 			return FALSE;
 		}
 
@@ -505,7 +551,7 @@ static BOOL audin_server_is_open(audin_server_context* context)
 	audin_server* audin = (audin_server*)context;
 
 	WINPR_ASSERT(audin);
-	return audin->thread != NULL;
+	return audin->thread != nullptr;
 }
 
 static BOOL audin_server_close(audin_server_context* context)
@@ -526,17 +572,17 @@ static BOOL audin_server_close(audin_server_context* context)
 
 		(void)CloseHandle(audin->thread);
 		(void)CloseHandle(audin->stopEvent);
-		audin->thread = NULL;
-		audin->stopEvent = NULL;
+		audin->thread = nullptr;
+		audin->stopEvent = nullptr;
 	}
 
 	if (audin->audin_channel)
 	{
 		(void)WTSVirtualChannelClose(audin->audin_channel);
-		audin->audin_channel = NULL;
+		audin->audin_channel = nullptr;
 	}
 
-	audin->audin_negotiated_format = NULL;
+	audin->audin_negotiated_format = nullptr;
 
 	return TRUE;
 }
@@ -546,11 +592,11 @@ static wStream* audin_server_packet_new(wLog* log, size_t size, BYTE MessageId)
 	WINPR_ASSERT(log);
 
 	/* Allocate what we need plus header bytes */
-	wStream* s = Stream_New(NULL, size + SNDIN_HEADER_SIZE);
+	wStream* s = Stream_New(nullptr, size + SNDIN_HEADER_SIZE);
 	if (!s)
 	{
 		WLog_Print(log, WLOG_ERROR, "Stream_New failed!");
-		return NULL;
+		return nullptr;
 	}
 
 	Stream_Write_UINT8(s, MessageId);
@@ -703,7 +749,7 @@ static UINT audin_server_receive_version_default(audin_server_context* audin_ctx
                                                  const SNDIN_VERSION* version)
 {
 	audin_server* audin = (audin_server*)audin_ctx;
-	SNDIN_FORMATS formats = { 0 };
+	SNDIN_FORMATS formats = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(audin);
 	WINPR_ASSERT(version);
@@ -724,7 +770,7 @@ static UINT audin_server_receive_version_default(audin_server_context* audin_ctx
 
 static UINT send_open(audin_server* audin)
 {
-	SNDIN_OPEN open = { 0 };
+	SNDIN_OPEN open = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(audin);
 
@@ -825,7 +871,7 @@ audin_server_context* audin_server_context_new(HANDLE vcm)
 	if (!audin)
 	{
 		WLog_ERR(AUDIN_TAG, "calloc failed!");
-		return NULL;
+		return nullptr;
 	}
 	audin->log = WLog_Get(AUDIN_TAG);
 	audin->context.vcm = vcm;
@@ -858,7 +904,7 @@ void audin_server_context_free(audin_server_context* context)
 
 	audin_server_close(context);
 	audio_formats_free(audin->audin_server_formats, audin->audin_n_server_formats);
-	audin->audin_server_formats = NULL;
+	audin->audin_server_formats = nullptr;
 	free(audin);
 }
 
@@ -870,8 +916,8 @@ BOOL audin_server_set_formats(audin_server_context* context, SSIZE_T count,
 
 	audio_formats_free(audin->audin_server_formats, audin->audin_n_server_formats);
 	audin->audin_n_server_formats = 0;
-	audin->audin_server_formats = NULL;
-	audin->audin_negotiated_format = NULL;
+	audin->audin_server_formats = nullptr;
+	audin->audin_negotiated_format = nullptr;
 
 	if (count < 0)
 	{

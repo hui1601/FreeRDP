@@ -14,8 +14,8 @@ static char* val3 = "val3";
 int TestListDictionary(int argc, char* argv[])
 {
 	size_t count = 0;
-	char* value = NULL;
-	wListDictionary* list = NULL;
+	char* value = nullptr;
+	wListDictionary* list = nullptr;
 
 	WINPR_UNUSED(argc);
 	WINPR_UNUSED(argv);
@@ -105,7 +105,8 @@ int TestListDictionary(int argc, char* argv[])
 		return -1;
 	}
 
-	ListDictionary_SetItemValue(list, key2, "apple");
+	if (!ListDictionary_SetItemValue(list, key2, "apple"))
+		return -1;
 
 	value = (char*)ListDictionary_GetItemValue(list, key2);
 

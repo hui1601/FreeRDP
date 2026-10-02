@@ -62,8 +62,8 @@ static BOOL gdiVideoShowSurface(VideoClientContext* video, const VideoSurface* s
                                 UINT32 destinationWidth, UINT32 destinationHeight)
 {
 	BOOL rc = FALSE;
-	rdpGdi* gdi = NULL;
-	rdpUpdate* update = NULL;
+	rdpGdi* gdi = nullptr;
+	rdpUpdate* update = nullptr;
 
 	WINPR_ASSERT(video);
 	WINPR_ASSERT(surface);
@@ -80,7 +80,7 @@ static BOOL gdiVideoShowSurface(VideoClientContext* video, const VideoSurface* s
 
 	if ((gdi->width < 0) || (gdi->height < 0))
 		goto fail;
-	else
+
 	{
 		const UINT32 nXSrc = surface->x;
 		const UINT32 nYSrc = surface->y;
@@ -106,11 +106,9 @@ static BOOL gdiVideoShowSurface(VideoClientContext* video, const VideoSurface* s
 		    (height > INT32_MAX))
 			goto fail;
 
-		gdi_InvalidateRegion(gdi->primary->hdc, (INT32)nXDst, (INT32)nYDst, (INT32)width,
-		                     (INT32)height);
+		rc = gdi_InvalidateRegion(gdi->primary->hdc, (INT32)nXDst, (INT32)nYDst, (INT32)width,
+		                          (INT32)height);
 	}
-
-	rc = TRUE;
 fail:
 
 	if (!update_end_paint(update))
@@ -142,7 +140,7 @@ void gdi_video_control_init(rdpGdi* gdi, VideoClientContext* video)
 void gdi_video_control_uninit(rdpGdi* gdi, WINPR_ATTR_UNUSED VideoClientContext* video)
 {
 	WINPR_ASSERT(gdi);
-	gdi->video = NULL;
+	gdi->video = nullptr;
 }
 
 void gdi_video_data_init(WINPR_ATTR_UNUSED rdpGdi* gdi, WINPR_ATTR_UNUSED VideoClientContext* video)
@@ -160,13 +158,14 @@ void gdi_video_data_uninit(WINPR_ATTR_UNUSED rdpGdi* gdi,
 
 VideoSurface* VideoClient_CreateCommonContext(size_t size, UINT32 x, UINT32 y, UINT32 w, UINT32 h)
 {
-	VideoSurface* ret = NULL;
+	if ((w == 0) || (h == 0))
+		return nullptr;
 
 	WINPR_ASSERT(size >= sizeof(VideoSurface));
 
-	ret = calloc(1, size);
+	VideoSurface* ret = calloc(1, size);
 	if (!ret)
-		return NULL;
+		return nullptr;
 
 	ret->format = PIXEL_FORMAT_BGRX32;
 	ret->x = x;
@@ -177,13 +176,13 @@ VideoSurface* VideoClient_CreateCommonContext(size_t size, UINT32 x, UINT32 y, U
 	ret->alignedHeight = ret->h + 32 - ret->h % 16;
 
 	ret->scanline = ret->alignedWidth * FreeRDPGetBytesPerPixel(ret->format);
-	ret->data = winpr_aligned_malloc(1ull * ret->scanline * ret->alignedHeight, 64);
+	ret->data = winpr_aligned_calloc(ret->scanline, ret->alignedHeight, 64);
 	if (!ret->data)
 		goto fail;
 	return ret;
 fail:
 	VideoClient_DestroyCommonContext(ret);
-	return NULL;
+	return nullptr;
 }
 
 void VideoClient_DestroyCommonContext(VideoSurface* surface)

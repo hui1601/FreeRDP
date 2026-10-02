@@ -40,7 +40,15 @@
 	    [[NSUserDefaults standardUserDefaults] objectForKey:@"TSXSharedGlobalDefaultBookmark"];
 
 	if (bookmark_data && [bookmark_data length])
-		bookmark = [NSKeyedUnarchiver unarchiveObjectWithData:bookmark_data];
+	{
+		NSError *error = nil;
+		bookmark = [NSKeyedUnarchiver unarchivedObjectOfClass:[ComputerBookmark class]
+		                                             fromData:bookmark_data
+		                                                error:&error];
+
+		if (!bookmark)
+			NSLog(@"%s: failed to unarchive the default bookmark: %@", __func__, error);
+	}
 
 	if (!bookmark)
 		bookmark = [[[ComputerBookmark alloc] initWithBaseDefaultParameters] autorelease];
@@ -68,21 +76,6 @@
 {
 	ConnectionParams *param_copy = [[[self bookmark] params] copy];
 	return param_copy;
-}
-
-- (ComputerBookmark *)newTestServerBookmark
-{
-	ComputerBookmark *bm = [self newBookmark];
-	[bm setLabel:@"Test Server"];
-	[[bm params] setValue:@"testservice.ifreerdp.com" forKey:@"hostname"];
-	[[bm params] setInt:0 forKey:@"screen_resolution_type"];
-	[[bm params] setInt:1024 forKey:@"width"];
-	[[bm params] setInt:768 forKey:@"height"];
-	[[bm params] setInt:32 forKey:@"colors"];
-	[[bm params] setBool:YES forKey:@"perf_remotefx"];
-	[[bm params] setBool:YES forKey:@"perf_gfx"];
-	[[bm params] setBool:YES forKey:@"perf_h264"];
-	return bm;
 }
 
 @end

@@ -1,6 +1,9 @@
 # codec
 
 option(WITH_CURSOR_DUMP "Dump mouse cursor data to binary directory" OFF)
+set(YUV_TILE_SIZE "512" CACHE STRING "YUV decoder per thread tile width/height")
+add_compile_definitions(YUV_TILE_SIZE=${YUV_TILE_SIZE})
+
 if(WITH_CURSOR_DUMP)
   add_compile_definitions(WITH_CURSOR_DUMP)
   add_compile_definitions(CURSOR_DUMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
@@ -45,7 +48,14 @@ set(CODEC_SRCS
     jpeg.c
     h264.c
     yuv.c
+    video.c
 )
+
+if(WITH_GFX_AV1)
+  include(WarnExperimental)
+  warn_experimental("AV1 codec support for GFX channel" "-DWITH_GFX_AV1=OFF")
+  list(APPEND CODEC_SRCS av1.c)
+endif()
 
 set(CODEC_SSE3_SRCS sse/rfx_sse2.c sse/rfx_sse2.h sse/nsc_sse2.c sse/nsc_sse2.h)
 
@@ -106,6 +116,34 @@ if(FAAC_FOUND)
   freerdp_pc_add_requires_private("faac")
 endif()
 
+if(WITH_AOM AND AOM_FOUND)
+  add_compile_definitions(WITH_LIBAOM)
+  list(APPEND CODEC_LIBS aom)
+  freerdp_pc_add_requires_private("aom")
+endif()
+
+if(WITH_DAV1D AND DAV1D_FOUND)
+  add_compile_definitions(WITH_DAV1D)
+  list(APPEND CODEC_LIBS dav1d)
+  freerdp_pc_add_requires_private("dav1d")
+endif()
+
+if(WITH_GFX_AV1)
+  if(WITH_DAV1D AND DAV1D_FOUND)
+    message(STATUS "AV1 decoder: dav1d")
+  elseif(WITH_AOM AND AOM_FOUND)
+    message(STATUS "AV1 decoder: libaom")
+  else()
+    message(STATUS "AV1 decoder: none (need -DWITH_DAV1D=ON or -DWITH_AOM=ON)")
+  endif()
+endif()
+
+if(WITH_YUV AND YUV_FOUND)
+  add_compile_definitions(WITH_LIBYUV)
+  list(APPEND CODEC_LIBS yuv)
+  freerdp_pc_add_requires_private("yuv")
+endif()
+
 if(WITH_OPENH264)
   set(CODEC_SRCS ${CODEC_SRCS} h264_openh264.c)
   include_directories(SYSTEM ${OPENH264_INCLUDE_DIR})
@@ -115,7 +153,25 @@ if(WITH_OPENH264)
   endif(NOT WITH_OPENH264_LOADING)
 endif()
 
+if(WITH_SWSCALE)
+  if(WITH_SWSCALE_LOADING)
+    set(CODEC_SRCS ${CODEC_SRCS} image_ffmpeg.c image_ffmpeg.h)
+  else()
+    include_directories(SYSTEM ${SWSCALE_INCLUDE_DIRS})
+  endif(WITH_SWSCALE_LOADING)
+endif()
+
+if(WITH_DSP_EXPERIMENTAL)
+  include(WarnExperimental)
+  warn_experimental("Experimental encoders/decoders for audio channels" "-DWITH_DSP_EXPERIMENTAL=OFF")
+endif()
+
 if(WITH_VIDEO_FFMPEG)
+  if(WITH_FFMPEG_HWACCEL)
+    include(WarnExperimental)
+    warn_experimental("Hardware encoder/decoder support for FFMPEG" "-DWITH_FFMPEG_HWACCEL=OFF")
+  endif()
+
   set(CODEC_SRCS ${CODEC_SRCS} h264_ffmpeg.c)
   include_directories(SYSTEM ${FFMPEG_INCLUDE_DIRS})
   list(APPEND CODEC_LIBS ${FFMPEG_LIBRARIES})
@@ -123,10 +179,14 @@ if(WITH_VIDEO_FFMPEG)
 endif()
 
 if(WIN32 AND WITH_MEDIA_FOUNDATION)
+  include(WarnExperimental)
+  warn_experimental("Experimental encoders/decoders for H264" "-DWITH_MEDIA_FOUNDATION=OFF")
   set(CODEC_SRCS ${CODEC_SRCS} h264_mf.c)
 endif()
 
 if(ANDROID AND WITH_MEDIACODEC)
+  include(WarnExperimental)
+  warn_experimental("Experimental encoders/decoders for H264" "-DWITH_MEDIACODEC=OFF")
   list(APPEND CODEC_SRCS h264_mediacodec.c)
 
   find_library(MEDIACODEC mediandk REQUIRED)

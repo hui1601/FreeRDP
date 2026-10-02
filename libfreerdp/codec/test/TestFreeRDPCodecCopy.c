@@ -17,19 +17,20 @@ static BOOL TestFreeRDPImageCopy(UINT32 w, UINT32 h, UINT32 srcFormat, UINT32 ds
 	BOOL rc = FALSE;
 	const size_t sbpp = FreeRDPGetBytesPerPixel(srcFormat);
 	const size_t dbpp = FreeRDPGetBytesPerPixel(dstFormat);
-	const size_t srcStep = w * sbpp;
-	const size_t dstStep = w * dbpp;
-	char* src = calloc(h, srcStep);
-	char* dst = calloc(h, dstStep);
+	const size_t srcStep = 1ull * w * sbpp;
+	const size_t dstStep = 1ull * w * dbpp;
+	BYTE* src = calloc(h, srcStep);
+	BYTE* dst = calloc(h, dstStep);
 	if (!src || !dst)
 		goto fail;
 
 	for (size_t x = 0; x < runs; x++)
 	{
-		winpr_RAND_pseudo(src, h * srcStep);
+		if (winpr_RAND_pseudo(src, h * srcStep) < 0)
+			goto fail;
 		const UINT64 start = winpr_GetUnixTimeNS();
 		rc = freerdp_image_copy(dst, dstFormat, dstStep, 0, 0, w, h, src, srcFormat, srcStep, 0, 0,
-		                        NULL, 0);
+		                        nullptr, 0);
 		const UINT64 end = winpr_GetUnixTimeNS();
 
 		double ms = (double)(end - start);
@@ -55,19 +56,20 @@ static BOOL TestFreeRDPImageCopy_no_overlap(UINT32 w, UINT32 h, UINT32 srcFormat
 	BOOL rc = FALSE;
 	const size_t sbpp = FreeRDPGetBytesPerPixel(srcFormat);
 	const size_t dbpp = FreeRDPGetBytesPerPixel(dstFormat);
-	const size_t srcStep = w * sbpp;
-	const size_t dstStep = w * dbpp;
-	char* src = calloc(h, srcStep);
-	char* dst = calloc(h, dstStep);
+	const size_t srcStep = 1ull * w * sbpp;
+	const size_t dstStep = 1ull * w * dbpp;
+	BYTE* src = calloc(h, srcStep);
+	BYTE* dst = calloc(h, dstStep);
 	if (!src || !dst)
 		goto fail;
 
 	for (size_t x = 0; x < runs; x++)
 	{
-		winpr_RAND_pseudo(src, h * srcStep);
+		if (winpr_RAND_pseudo(src, h * srcStep) < 0)
+			goto fail;
 		const UINT64 start = winpr_GetUnixTimeNS();
 		rc = freerdp_image_copy_no_overlap(dst, dstFormat, dstStep, 0, 0, w, h, src, srcFormat,
-		                                   srcStep, 0, 0, NULL, 0);
+		                                   srcStep, 0, 0, nullptr, 0);
 		const UINT64 end = winpr_GetUnixTimeNS();
 
 		double ms = (double)(end - start);
@@ -103,11 +105,11 @@ int TestFreeRDPCodecCopy(int argc, char* argv[])
 	if (argc == 3)
 	{
 		errno = 0;
-		width = strtoul(argv[1], NULL, 0);
-		height = strtoul(argv[2], NULL, 0);
+		width = strtoul(argv[1], nullptr, 0);
+		height = strtoul(argv[2], nullptr, 0);
 		if ((errno != 0) || (width == 0) || (height == 0))
 		{
-			char buffer[128] = { 0 };
+			char buffer[128] = WINPR_C_ARRAY_INIT;
 			(void)fprintf(stderr, "%s failed: width=%" PRIu32 ", height=%" PRIu32 ", errno=%s\n",
 			              __func__, width, height, winpr_strerror(errno, buffer, sizeof(buffer)));
 			return -1;

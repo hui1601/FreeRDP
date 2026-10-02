@@ -35,47 +35,89 @@
 
 #include <string.h>
 
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_enforce_consistency(rdpSettings* settings);
+
+/** @brief Replace a KeyboardType value that is not one of WINPR_KBD_TYPE with
+ *  WINPR_KBD_TYPE_IBM_ENHANCED, logging a warning.
+ *
+ *  Some clients (e.g. mstsc.exe on Windows 11 25H2) advertise out of spec
+ *  keyboard types; the scancode translation in WinPR only knows the types in
+ *  [MS-RDPBCGR] 2.2.1.3.2 and would otherwise map every key to VK_NONE.
+ *
+ *  @param log the logger to use, may be \b NULL
+ *  @param settings the settings to sanitize, must not be \b NULL
+ *  @param source a short description of where the value came from
+ */
+FREERDP_LOCAL void freerdp_settings_sanitize_keyboard_type(wLog* log, rdpSettings* settings,
+                                                           const char* source);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_enforce_monitor_exists(rdpSettings* settings);
+
 FREERDP_LOCAL void freerdp_settings_print_warnings(const rdpSettings* settings);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_check_client_after_preconnect(const rdpSettings* settings);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_set_default_order_support(rdpSettings* settings);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_clone_keys(rdpSettings* dst, const rdpSettings* src);
+
 FREERDP_LOCAL void freerdp_settings_free_keys(rdpSettings* dst, BOOL cleanup);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_set_string_(rdpSettings* settings,
                                                 FreeRDP_Settings_Keys_String id, const char* val,
                                                 size_t len);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_set_string_copy_(rdpSettings* settings,
                                                      FreeRDP_Settings_Keys_String id,
                                                      const char* val, size_t len, BOOL cleanup);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_capability_buffer_resize(rdpSettings* settings, size_t count,
                                                     BOOL force);
 
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL identity_set_from_settings_with_pwd(SEC_WINNT_AUTH_IDENTITY_W* identity,
                                                        const rdpSettings* settings,
                                                        FreeRDP_Settings_Keys_String UserId,
                                                        FreeRDP_Settings_Keys_String DomainId,
                                                        const WCHAR* Password, size_t pwdLen);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL identity_set_from_settings(SEC_WINNT_AUTH_IDENTITY_W* identity,
                                               const rdpSettings* settings,
                                               FreeRDP_Settings_Keys_String UserId,
                                               FreeRDP_Settings_Keys_String DomainId,
                                               FreeRDP_Settings_Keys_String PwdId);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL identity_set_from_smartcard_hash(SEC_WINNT_AUTH_IDENTITY_W* identity,
                                                     const rdpSettings* settings,
                                                     FreeRDP_Settings_Keys_String userId,
                                                     FreeRDP_Settings_Keys_String domainId,
                                                     FreeRDP_Settings_Keys_String pwdId,
                                                     const BYTE* certSha1, size_t sha1len);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL const char* freerdp_settings_glyph_level_string(UINT32 level, char* buffer,
                                                               size_t size);
 
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_settings_set_pointer_len_(rdpSettings* settings,
                                                      FreeRDP_Settings_Keys_Pointer id,
                                                      FreeRDP_Settings_Keys_UInt32 lenId,
                                                      const void* data, size_t len, size_t size);
+
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_target_net_adresses_reset(rdpSettings* settings, size_t size);
 
+WINPR_ATTR_NODISCARD
 FREERDP_LOCAL BOOL freerdp_target_net_addresses_resize(rdpSettings* settings, size_t count);
 
 #endif /* FREERDP_LIB_CORE_SETTINGS_H */

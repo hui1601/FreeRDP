@@ -31,9 +31,9 @@ static void write_log(unsigned log_level, WINPR_FORMAT_ARG const char* fmt, ...)
 
 	if (WLog_IsLevelActive(log, log_level))
 	{
-		char buffer[1024] = { 0 };
+		char buffer[1024] = WINPR_C_ARRAY_INIT;
 
-		va_list ap = { 0 };
+		va_list ap = WINPR_C_ARRAY_INIT;
 		va_start(ap, fmt);
 		(void)vsnprintf(buffer, sizeof(buffer), fmt, ap);
 		va_end(ap);
@@ -71,15 +71,19 @@ BOOL fdk_aac_dsp_encode(FREERDP_DSP_COMMON_CONTEXT* context, const AUDIO_FORMAT*
 	if (!Stream_EnsureRemainingCapacity(out, context->buffersize))
 		return FALSE;
 
+	size_t offset = 0;
+	while (offset < length)
 	{
-		const ssize_t encoded =
-		    fdk_aac_dsp_impl_encode(context->fdkAacInstance, data, length, Stream_Pointer(out),
-		                            Stream_GetRemainingCapacity(out), write_log);
-		if (encoded < 0)
+		size_t consumed = 0;
+		const ssize_t encoded = fdk_aac_dsp_impl_encode(
+		    context->fdkAacInstance, &data[offset], length - offset, Stream_Pointer(out),
+		    Stream_GetRemainingCapacity(out), &consumed, write_log);
+		if ((encoded < 0) || (consumed == 0))
 			return FALSE;
 		Stream_Seek(out, (size_t)encoded);
-		return TRUE;
+		offset += consumed;
 	}
+	return TRUE;
 }
 
 BOOL fdk_aac_dsp_decode(FREERDP_DSP_COMMON_CONTEXT* context, const AUDIO_FORMAT* srcFormat,

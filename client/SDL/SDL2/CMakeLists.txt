@@ -16,6 +16,12 @@
 # limitations under the License.
 set(MODULE_NAME "sdl2-freerdp")
 
+include(WarnUnmaintained)
+warn_unmaintained("SDL2 client" "-DWITH_CLIENT_SDL2=OFF")
+
+include(WarnExperimental)
+warn_experimental("SDL2 client" "-DWITH_CLIENT_SDL2=OFF")
+
 find_package(SDL2 REQUIRED)
 
 find_package(Threads REQUIRED)
@@ -43,6 +49,8 @@ set(SRCS
     sdl_window.cpp
 )
 
+add_win_console_manifest(SRCS)
+
 list(
   APPEND
   LIBS
@@ -52,7 +60,6 @@ list(
   Threads::Threads
   sdl2_client_res
   sdl2-dialogs
-  sdl-common-aad-view
   sdl-common-prefs
 )
 

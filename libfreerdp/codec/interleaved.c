@@ -387,7 +387,8 @@ static inline BOOL ensure_capacity_(const BYTE* start, const BYTE* end, size_t s
 		WLog_ERR(TAG,
 		         "[%s:%" PRIuz "] failed: start=%p <= end=%p, available=%" PRIuz " >= size=%" PRIuz
 		         " * base=%" PRIuz,
-		         fkt, line, start, end, available, size, base);
+		         fkt, line, WINPR_CXX_COMPAT_CAST(const void*, start),
+		         WINPR_CXX_COMPAT_CAST(const void*, end), available, size, base);
 	return res;
 }
 
@@ -466,7 +467,8 @@ static inline void write_pixel_16(BYTE* _buf, UINT16 _pix)
 		write_pixel_16(_buf, _pix); \
 		(_buf) += 2;                \
 	} while (0)
-#define DESTREADPIXEL(_pix, _buf) _pix = ((UINT16*)(_buf))[0]
+#define DESTREADPIXEL(_pix, _buf) \
+	(_pix) = WINPR_ASSERTING_INT_CAST(UINT16, (_buf)[0] | (((_buf)[1] << 8) & 0xFF00))
 #define SRCREADPIXEL(_pix, _buf)                                                            \
 	do                                                                                      \
 	{                                                                                       \
@@ -536,28 +538,40 @@ BOOL interleaved_decompress(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleav
 {
 	UINT32 scanline = 0;
 	UINT32 SrcFormat = 0;
-	UINT32 BufferSize = 0;
 
 	if (!interleaved || !pSrcData || !pDstData)
 	{
-		WLog_ERR(TAG, "invalid arguments: interleaved=%p, pSrcData=%p, pDstData=%p", interleaved,
-		         pSrcData, pDstData);
+		WLog_ERR(TAG, "invalid arguments: interleaved=%p, pSrcData=%p, pDstData=%p",
+		         WINPR_CXX_COMPAT_CAST(const void*, interleaved),
+		         WINPR_CXX_COMPAT_CAST(const void*, pSrcData),
+		         WINPR_CXX_COMPAT_CAST(const void*, pDstData));
 		return FALSE;
 	}
+
+	if ((nSrcWidth == 0) || (nSrcHeight == 0))
+		return FALSE;
+	if ((nDstWidth == 0) || (nDstHeight == 0))
+		return FALSE;
 
 	switch (bpp)
 	{
 		case 24:
+			if (nSrcWidth > UINT32_MAX / 3)
+				return FALSE;
 			scanline = nSrcWidth * 3;
 			SrcFormat = PIXEL_FORMAT_BGR24;
 			break;
 
 		case 16:
+			if (nSrcWidth > UINT32_MAX / 2)
+				return FALSE;
 			scanline = nSrcWidth * 2;
 			SrcFormat = PIXEL_FORMAT_RGB16;
 			break;
 
 		case 15:
+			if (nSrcWidth > UINT32_MAX / 2)
+				return FALSE;
 			scanline = nSrcWidth * 2;
 			SrcFormat = PIXEL_FORMAT_RGB15;
 			break;
@@ -572,7 +586,10 @@ BOOL interleaved_decompress(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleav
 			return FALSE;
 	}
 
-	BufferSize = scanline * nSrcHeight;
+	if (scanline > UINT32_MAX / nSrcHeight)
+		return FALSE;
+
+	const UINT32 BufferSize = scanline * nSrcHeight;
 
 	if (BufferSize > interleaved->TempSize)
 	{
@@ -583,7 +600,7 @@ BOOL interleaved_decompress(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleav
 
 	if (!interleaved->TempBuffer)
 	{
-		WLog_ERR(TAG, "interleaved->TempBuffer=%p", interleaved->TempBuffer);
+		WLog_ERR(TAG, "interleaved->TempBuffer=nullptr");
 		return FALSE;
 	}
 
@@ -642,7 +659,7 @@ BOOL interleaved_compress(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleaved
                           const gdiPalette* WINPR_RESTRICT palette, UINT32 bpp)
 {
 	BOOL status = 0;
-	wStream* s = NULL;
+	wStream* s = nullptr;
 	UINT32 DstFormat = 0;
 	const UINT32 maxSize = 64 * 64 * 4;
 
@@ -695,13 +712,10 @@ BOOL interleaved_compress(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleaved
 	if (!s)
 		return FALSE;
 
-	Stream_SetPosition(interleaved->bts, 0);
+	Stream_ResetPosition(interleaved->bts);
 
-	if (freerdp_bitmap_compress(interleaved->TempBuffer, nWidth, nHeight, s, bpp, maxSize,
-	                            nHeight - 1, interleaved->bts, 0) < 0)
-		status = FALSE;
-	else
-		status = TRUE;
+	status = (freerdp_bitmap_compress(interleaved->TempBuffer, nWidth, nHeight, s, bpp, maxSize,
+	                                  nHeight - 1, interleaved->bts, 0) >= 0);
 
 	Stream_SealLength(s);
 	*pDstSize = (UINT32)Stream_Length(s);
@@ -711,17 +725,14 @@ BOOL interleaved_compress(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleaved
 
 BOOL bitmap_interleaved_context_reset(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleaved)
 {
-	if (!interleaved)
-		return FALSE;
-
-	return TRUE;
+	return (interleaved != nullptr);
 }
 
 BITMAP_INTERLEAVED_CONTEXT* bitmap_interleaved_context_new(WINPR_ATTR_UNUSED BOOL Compressor)
 {
-	BITMAP_INTERLEAVED_CONTEXT* interleaved = NULL;
+	BITMAP_INTERLEAVED_CONTEXT* interleaved = nullptr;
 	interleaved = (BITMAP_INTERLEAVED_CONTEXT*)winpr_aligned_recalloc(
-	    NULL, 1, sizeof(BITMAP_INTERLEAVED_CONTEXT), 32);
+	    nullptr, 1, sizeof(BITMAP_INTERLEAVED_CONTEXT), 32);
 
 	if (interleaved)
 	{
@@ -731,7 +742,7 @@ BITMAP_INTERLEAVED_CONTEXT* bitmap_interleaved_context_new(WINPR_ATTR_UNUSED BOO
 		if (!interleaved->TempBuffer)
 			goto fail;
 
-		interleaved->bts = Stream_New(NULL, interleaved->TempSize);
+		interleaved->bts = Stream_New(nullptr, interleaved->TempSize);
 
 		if (!interleaved->bts)
 			goto fail;
@@ -744,7 +755,7 @@ fail:
 	WINPR_PRAGMA_DIAG_IGNORED_MISMATCHED_DEALLOC
 	bitmap_interleaved_context_free(interleaved);
 	WINPR_PRAGMA_DIAG_POP
-	return NULL;
+	return nullptr;
 }
 
 void bitmap_interleaved_context_free(BITMAP_INTERLEAVED_CONTEXT* WINPR_RESTRICT interleaved)

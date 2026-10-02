@@ -71,7 +71,7 @@ static void redirection_free_array(char*** what, UINT32* count)
 		free((void*)*what);
 	}
 
-	*what = NULL;
+	*what = nullptr;
 	*count = 0;
 }
 
@@ -79,7 +79,7 @@ static void redirection_free_string(char** str)
 {
 	WINPR_ASSERT(str);
 	free(*str);
-	*str = NULL;
+	*str = nullptr;
 }
 
 static void redirection_free_data(BYTE** str, UINT32* length)
@@ -88,7 +88,7 @@ static void redirection_free_data(BYTE** str, UINT32* length)
 	free(*str);
 	if (length)
 		*length = 0;
-	*str = NULL;
+	*str = nullptr;
 }
 
 static BOOL redirection_copy_string(char** dst, const char* str)
@@ -98,7 +98,7 @@ static BOOL redirection_copy_string(char** dst, const char* str)
 		return TRUE;
 
 	*dst = _strdup(str);
-	return *dst != NULL;
+	return *dst != nullptr;
 }
 
 static BOOL redirection_copy_data(BYTE** dst, UINT32* plen, const BYTE* str, size_t len)
@@ -115,7 +115,7 @@ static BOOL redirection_copy_data(BYTE** dst, UINT32* plen, const BYTE* str, siz
 		return FALSE;
 	memcpy(*dst, str, len);
 	*plen = (UINT32)len;
-	return *dst != NULL;
+	return *dst != nullptr;
 }
 
 static BOOL redirection_copy_array(char*** dst, UINT32* plen, const char** str, size_t len)
@@ -144,7 +144,7 @@ static BOOL redirection_copy_array(char*** dst, UINT32* plen, const char** str, 
 		}
 	}
 
-	return *dst != NULL;
+	return *dst != nullptr;
 }
 
 static BOOL rdp_redirection_get_data(wStream* s, UINT32* pLength, const BYTE** pData)
@@ -165,21 +165,24 @@ static BOOL rdp_redirection_get_data(wStream* s, UINT32* pLength, const BYTE** p
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL rdp_redirection_read_unicode_string(wStream* s, char** str, size_t maxLength)
 {
 	UINT32 length = 0;
-	const BYTE* data = NULL;
+	const BYTE* data = nullptr;
 
 	if (!rdp_redirection_get_data(s, &length, &data))
 		return FALSE;
 
-	const WCHAR* wstr = (const WCHAR*)data;
-
-	if ((length % 2) || length < 2 || length > maxLength)
+	if ((length % 2) || (length < 2) || (length > maxLength))
 	{
 		WLog_ERR(TAG, "failure: invalid unicode string length: %" PRIu32 "", length);
 		return FALSE;
 	}
+
+	WCHAR wstr[513] = WINPR_C_ARRAY_INIT;
+	WINPR_ASSERT(ARRAYSIZE(wstr) > maxLength);
+	memcpy(wstr, data, length);
 
 	if (wstr[length / 2 - 1])
 	{
@@ -188,7 +191,7 @@ static BOOL rdp_redirection_read_unicode_string(wStream* s, char** str, size_t m
 	}
 
 	redirection_free_string(str);
-	*str = ConvertWCharNToUtf8Alloc(wstr, length / sizeof(WCHAR), NULL);
+	*str = ConvertWCharNToUtf8Alloc(wstr, length / sizeof(WCHAR), nullptr);
 	if (!*str)
 	{
 		WLog_ERR(TAG, "failure: string conversion failed");
@@ -220,12 +223,13 @@ static BOOL rdp_redirection_write_base64_wchar(WINPR_ATTR_UNUSED UINT32 flag, wS
 {
 	BOOL rc = FALSE;
 
-	char* base64 = crypto_base64_encode(data, length);
+	size_t olen = 0;
+	char* base64 = crypto_base64_encode_len(data, length, &olen);
 	if (!base64)
 		return FALSE;
 
 	size_t wbase64len = 0;
-	WCHAR* wbase64 = ConvertUtf8ToWCharAlloc(base64, &wbase64len);
+	WCHAR* wbase64 = ConvertUtf8NToWCharAlloc(base64, olen, &wbase64len);
 	free(base64);
 	if (!wbase64)
 		return FALSE;
@@ -239,53 +243,55 @@ static BOOL rdp_redirection_read_base64_wchar(UINT32 flag, wStream* s, UINT32* p
                                               BYTE** pData)
 {
 	BOOL rc = FALSE;
-	char buffer[64] = { 0 };
-	const BYTE* ptr = NULL;
+	char buffer[64] = WINPR_C_ARRAY_INIT;
+	const BYTE* ptr = nullptr;
 
 	if (!rdp_redirection_get_data(s, pLength, &ptr))
 		return FALSE;
-	const WCHAR* wchar = (const WCHAR*)ptr;
+	const WCHAR* wchar = WINPR_PACKED_ALIGN_CAST(const WCHAR*, ptr);
 
 	size_t utf8_len = 0;
 	char* utf8 = ConvertWCharNToUtf8Alloc(wchar, *pLength / sizeof(WCHAR), &utf8_len);
 	if (!utf8)
 		goto fail;
 
-	redirection_free_data(pData, NULL);
+	redirection_free_data(pData, nullptr);
 
 	utf8_len = strnlen(utf8, utf8_len);
-	*pData = NULL;
+	*pData = nullptr;
 	if (utf8_len > 0)
 		*pData = calloc(utf8_len, sizeof(BYTE));
 	if (!*pData)
 		goto fail;
 
-	size_t rlen = utf8_len;
-	size_t wpos = 0;
-	char* saveptr = NULL;
-	char* tok = strtok_s(utf8, "\r\n", &saveptr);
-	while (tok)
 	{
-		const size_t len = strnlen(tok, rlen);
-		rlen -= len;
+		size_t rlen = utf8_len;
+		size_t wpos = 0;
+		char* saveptr = nullptr;
+		char* tok = strtok_s(utf8, "\r\n", &saveptr);
+		while (tok)
+		{
+			const size_t len = strnlen(tok, rlen);
+			rlen -= len;
 
-		size_t bplen = 0;
-		BYTE* bptr = NULL;
-		crypto_base64_decode(tok, len, &bptr, &bplen);
-		if (!bptr)
+			size_t bplen = 0;
+			BYTE* bptr = nullptr;
+			crypto_base64_decode(tok, len, &bptr, &bplen);
+			if (!bptr)
+				goto fail;
+			memcpy(&(*pData)[wpos], bptr, bplen);
+			wpos += bplen;
+			free(bptr);
+
+			tok = strtok_s(nullptr, "\r\n", &saveptr);
+		}
+		if (wpos > UINT32_MAX)
 			goto fail;
-		memcpy(&(*pData)[wpos], bptr, bplen);
-		wpos += bplen;
-		free(bptr);
 
-		tok = strtok_s(NULL, "\r\n", &saveptr);
+		*pLength = (UINT32)wpos;
+
+		WLog_DBG(TAG, "%s:", rdp_redirection_flags_to_string(flag, buffer, sizeof(buffer)));
 	}
-	if (wpos > UINT32_MAX)
-		goto fail;
-
-	*pLength = (UINT32)wpos;
-
-	WLog_DBG(TAG, "%s:", rdp_redirection_flags_to_string(flag, buffer, sizeof(buffer)));
 
 	rc = TRUE;
 fail:
@@ -351,14 +357,14 @@ BOOL rdp_redirection_read_target_cert(rdpCertificate** ptargetCertificate, const
 {
 	WINPR_ASSERT(ptargetCertificate);
 
-	wStream sbuffer = { 0 };
+	wStream sbuffer = WINPR_C_ARRAY_INIT;
 	wStream* s = Stream_StaticConstInit(&sbuffer, data, length);
 
 	freerdp_certificate_free(*ptargetCertificate);
-	*ptargetCertificate = NULL;
+	*ptargetCertificate = nullptr;
 
 	size_t plength = 0;
-	const BYTE* ptr = NULL;
+	const BYTE* ptr = nullptr;
 	while (Stream_GetRemainingLength(s) > 0)
 	{
 		UINT32 type = 0;
@@ -383,19 +389,20 @@ BOOL rdp_redirection_read_target_cert(rdpCertificate** ptargetCertificate, const
 				else
 				{
 					WLog_ERR(TAG,
-					         "TargetCertificate data in unknown encoding %" PRIu32 " detected!");
+					         "TargetCertificate data in unknown encoding %" PRIu32 " detected!",
+					         encoding);
 				}
 				break;
 			default: /* ignore unknown fields */
 				WLog_VRB(TAG,
 				         "Unknown TargetCertificate field type %" PRIu32 ", encoding %" PRIu32
-				         " of length %" PRIu32,
+				         " of length %" PRIuz,
 				         type, encoding, plength);
 				break;
 		}
 	}
 
-	return *ptargetCertificate != NULL;
+	return *ptargetCertificate != nullptr;
 }
 
 static BOOL rdp_redirection_write_target_cert(wStream* s, const rdpRedirection* redirection)
@@ -424,7 +431,7 @@ fail:
 static BOOL rdp_redireciton_write_target_cert_stream(wStream* s, const rdpRedirection* redirection)
 {
 	BOOL rc = FALSE;
-	wStream* serialized = Stream_New(NULL, 2048);
+	wStream* serialized = Stream_New(nullptr, 2048);
 	if (!serialized)
 		goto fail;
 
@@ -442,7 +449,7 @@ fail:
 static BOOL rdp_redirection_read_target_cert_stream(wStream* s, rdpRedirection* redirection)
 {
 	UINT32 length = 0;
-	BYTE* ptr = NULL;
+	BYTE* ptr = nullptr;
 
 	WINPR_ASSERT(redirection);
 
@@ -476,8 +483,8 @@ BOOL rdp_set_target_certificate(rdpSettings* settings, const rdpCertificate* tce
 
 int rdp_redirection_apply_settings(rdpRdp* rdp)
 {
-	rdpSettings* settings = NULL;
-	rdpRedirection* redirection = NULL;
+	rdpSettings* settings = nullptr;
+	rdpRedirection* redirection = nullptr;
 
 	if (!rdp_reset_runtime_settings(rdp))
 		return -1;
@@ -570,7 +577,7 @@ int rdp_redirection_apply_settings(rdpRdp* rdp)
 			size_t tsvlen = 0;
 
 			char* tsv =
-			    ConvertWCharNToUtf8Alloc((const WCHAR*)redirection->TsvUrl,
+			    ConvertWCharNToUtf8Alloc(WINPR_PACKED_ALIGN_CAST(const WCHAR*, redirection->TsvUrl),
 			                             redirection->TsvUrlLength / sizeof(WCHAR), &tsvlen);
 			if (!tsv || !lb)
 				valid = FALSE;
@@ -612,7 +619,7 @@ int rdp_redirection_apply_settings(rdpRdp* rdp)
 		 * Free previous LoadBalanceInfo, if any, otherwise it may end up
 		 * being reused for the redirected session, which is not what we want.
 		 */
-		if (!freerdp_settings_set_pointer_len(settings, FreeRDP_LoadBalanceInfo, NULL, 0))
+		if (!freerdp_settings_set_pointer_len(settings, FreeRDP_LoadBalanceInfo, nullptr, 0))
 			return -1;
 	}
 
@@ -640,13 +647,13 @@ int rdp_redirection_apply_settings(rdpRdp* rdp)
 
 static BOOL rdp_redirection_read_data(UINT32 flag, wStream* s, UINT32* pLength, BYTE** pData)
 {
-	char buffer[64] = { 0 };
-	const BYTE* ptr = NULL;
+	char buffer[64] = WINPR_C_ARRAY_INIT;
+	const BYTE* ptr = nullptr;
 
 	if (!rdp_redirection_get_data(s, pLength, &ptr))
 		return FALSE;
 
-	redirection_free_data(pData, NULL);
+	redirection_free_data(pData, nullptr);
 	*pData = (BYTE*)malloc(*pLength);
 
 	if (!*pData)
@@ -660,7 +667,7 @@ static BOOL rdp_redirection_read_data(UINT32 flag, wStream* s, UINT32* pLength, 
 
 static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 {
-	char buffer[256] = { 0 };
+	char buffer[256] = WINPR_C_ARRAY_INIT;
 	UINT16 flags = 0;
 	UINT16 length = 0;
 	rdpRedirection* redirection = rdp->redirection;
@@ -671,8 +678,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 	Stream_Read_UINT16(s, flags); /* flags (2 bytes) */
 	if (flags != SEC_REDIRECTION_PKT)
 	{
-		char buffer1[1024] = { 0 };
-		char buffer2[1024] = { 0 };
+		char buffer1[1024] = WINPR_C_ARRAY_INIT;
+		char buffer2[1024] = WINPR_C_ARRAY_INIT;
 		WLog_ERR(TAG, "received invalid flags=%s, expected %s",
 		         rdp_security_flag_string(flags, buffer1, sizeof(buffer1)),
 		         rdp_security_flag_string(SEC_REDIRECTION_PKT, buffer2, sizeof(buffer2)));
@@ -704,6 +711,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 	{
 		if (!rdp_redirection_read_unicode_string(s, &(redirection->TargetNetAddress), 80))
 			return STATE_RUN_FAILED;
+		if (!utils_is_valid_ip(redirection->TargetNetAddress))
+			return STATE_RUN_FAILED;
 	}
 
 	if (redirection->flags & LB_LOAD_BALANCE_INFO)
@@ -723,7 +732,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 	{
 		if (!rdp_redirection_read_unicode_string(s, &(redirection->Username), 512))
 			return STATE_RUN_FAILED;
-
+		if (winpr_str_has_newlines(redirection->Username))
+			return STATE_RUN_FAILED;
 		WLog_DBG(TAG, "Username: %s", redirection->Username);
 	}
 
@@ -731,7 +741,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 	{
 		if (!rdp_redirection_read_unicode_string(s, &(redirection->Domain), 52))
 			return STATE_RUN_FAILED;
-
+		if (winpr_str_has_newlines(redirection->Domain))
+			return STATE_RUN_FAILED;
 		WLog_DBG(TAG, "Domain: %s", redirection->Domain);
 	}
 
@@ -777,9 +788,10 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 			}
 
 			/* Ensure the text password is '\0' terminated */
-			if (_wcsnlen((const WCHAR*)redirection->Password, charLen) == charLen)
+			if (_wcsnlen(WINPR_PACKED_ALIGN_CAST(const WCHAR*, redirection->Password), charLen) ==
+			    charLen)
 			{
-				WLog_ERR(TAG, "LB_PASSWORD: missing '\0' termination");
+				WLog_ERR(TAG, "LB_PASSWORD: missing '\\0' termination");
 				return STATE_RUN_FAILED;
 			}
 		}
@@ -789,7 +801,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 	{
 		if (!rdp_redirection_read_unicode_string(s, &(redirection->TargetFQDN), 512))
 			return STATE_RUN_FAILED;
-
+		if (!winpr_str_is_valid_url(redirection->TargetFQDN))
+			return STATE_RUN_FAILED;
 		WLog_DBG(TAG, "TargetFQDN: %s", redirection->TargetFQDN);
 	}
 
@@ -797,7 +810,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 	{
 		if (!rdp_redirection_read_unicode_string(s, &(redirection->TargetNetBiosName), 32))
 			return STATE_RUN_FAILED;
-
+		if (!winpr_str_is_valid_url(redirection->TargetNetBiosName))
+			return STATE_RUN_FAILED;
 		WLog_DBG(TAG, "TargetNetBiosName: %s", redirection->TargetNetBiosName);
 	}
 
@@ -867,7 +881,8 @@ static state_run_t rdp_recv_server_redirection_pdu(rdpRdp* rdp, wStream* s)
 		{
 			if (!rdp_redirection_read_unicode_string(s, &(redirection->TargetNetAddresses[i]), 80))
 				return STATE_RUN_FAILED;
-
+			if (!utils_is_valid_ip(redirection->TargetNetAddresses[i]))
+				return STATE_RUN_FAILED;
 			WLog_DBG(TAG, "TargetNetAddresses[%" PRIu32 "]: %s", i,
 			         redirection->TargetNetAddresses[i]);
 		}
@@ -895,7 +910,10 @@ state_run_t rdp_recv_enhanced_security_redirection_packet(rdpRdp* rdp, wStream* 
 	status = rdp_recv_server_redirection_pdu(rdp, s);
 
 	if (state_run_failed(status))
+	{
+		WLog_Print(rdp->log, WLOG_ERROR, "redirection packet invalid, aborting");
 		return status;
+	}
 
 	if (Stream_GetRemainingLength(s) >= 1)
 	{
@@ -940,13 +958,17 @@ void redirection_free(rdpRedirection* redirection)
 
 static SSIZE_T redir_write_string(WINPR_ATTR_UNUSED UINT32 flag, wStream* s, const char* str)
 {
-	const size_t length = (strlen(str) + 1);
+	const SSIZE_T devNameWLen = ConvertUtf8ToWChar(str, nullptr, 0);
+	if (devNameWLen < 0)
+		return -1;
+	const size_t length = WINPR_ASSERTING_INT_CAST(size_t, devNameWLen) + 1;
+	const size_t slen = strlen(str);
 	if (!Stream_EnsureRemainingCapacity(s, 4ull + length * sizeof(WCHAR)))
 		return -1;
 
 	const size_t pos = Stream_GetPosition(s);
 	Stream_Write_UINT32(s, (UINT32)length * sizeof(WCHAR));
-	if (Stream_Write_UTF16_String_From_UTF8(s, length, str, length, TRUE) < 0)
+	if (Stream_Write_UTF16_String_From_UTF8(s, length, str, slen, TRUE) < 0)
 		return -1;
 	return (SSIZE_T)(Stream_GetPosition(s) - pos);
 }
@@ -974,121 +996,131 @@ BOOL rdp_write_enhanced_security_redirection_packet(wStream* s, const rdpRedirec
 
 	Stream_Write_UINT16(s, 0);
 
-	const size_t start = Stream_GetPosition(s);
-	Stream_Write_UINT16(s, SEC_REDIRECTION_PKT);
-	const size_t lengthOffset = Stream_GetPosition(s);
-	Stream_Seek_UINT16(s); /* placeholder for length */
-
-	if (redirection->sessionID)
-		Stream_Write_UINT32(s, redirection->sessionID);
-	else
-		Stream_Write_UINT32(s, 0);
-
-	Stream_Write_UINT32(s, redirection->flags);
-
-	if (redirection->flags & LB_TARGET_NET_ADDRESS)
 	{
-		if (redir_write_string(LB_TARGET_NET_ADDRESS, s, redirection->TargetNetAddress) < 0)
-			goto fail;
-	}
+		const size_t start = Stream_GetPosition(s);
+		Stream_Write_UINT16(s, SEC_REDIRECTION_PKT);
+		const size_t lengthOffset = Stream_GetPosition(s);
+		Stream_Seek_UINT16(s); /* placeholder for length */
 
-	if (redirection->flags & LB_LOAD_BALANCE_INFO)
-	{
-		const UINT32 length = 13 + redirection->LoadBalanceInfoLength + 2;
-		if (!Stream_EnsureRemainingCapacity(s, length))
-			goto fail;
-		Stream_Write_UINT32(s, length);
-		Stream_Write(s, "Cookie: msts=", 13);
-		Stream_Write(s, redirection->LoadBalanceInfo, redirection->LoadBalanceInfoLength);
-		Stream_Write_UINT8(s, 0x0d);
-		Stream_Write_UINT8(s, 0x0a);
-	}
+		if (redirection->sessionID)
+			Stream_Write_UINT32(s, redirection->sessionID);
+		else
+			Stream_Write_UINT32(s, 0);
 
-	if (redirection->flags & LB_USERNAME)
-	{
-		if (redir_write_string(LB_USERNAME, s, redirection->Username) < 0)
-			goto fail;
-	}
+		Stream_Write_UINT32(s, redirection->flags);
 
-	if (redirection->flags & LB_DOMAIN)
-	{
-		if (redir_write_string(LB_DOMAIN, s, redirection->Domain) < 0)
-			goto fail;
-	}
-
-	if (redirection->flags & LB_PASSWORD)
-	{
-		/* Password is either UNICODE or opaque data */
-		if (!redir_write_data(LB_PASSWORD, s, redirection->PasswordLength, redirection->Password))
-			goto fail;
-	}
-
-	if (redirection->flags & LB_TARGET_FQDN)
-	{
-		if (redir_write_string(LB_TARGET_FQDN, s, redirection->TargetFQDN) < 0)
-			goto fail;
-	}
-
-	if (redirection->flags & LB_TARGET_NETBIOS_NAME)
-	{
-		if (redir_write_string(LB_TARGET_NETBIOS_NAME, s, redirection->TargetNetBiosName) < 0)
-			goto fail;
-	}
-
-	if (redirection->flags & LB_CLIENT_TSV_URL)
-	{
-		if (!redir_write_data(LB_CLIENT_TSV_URL, s, redirection->TsvUrlLength, redirection->TsvUrl))
-			goto fail;
-	}
-
-	if (redirection->flags & LB_REDIRECTION_GUID)
-	{
-		if (!redir_write_data(LB_REDIRECTION_GUID, s, redirection->RedirectionGuidLength,
-		                      redirection->RedirectionGuid))
-			goto fail;
-	}
-
-	if (redirection->flags & LB_TARGET_CERTIFICATE)
-	{
-		if (!rdp_redireciton_write_target_cert_stream(s, redirection))
-			goto fail;
-	}
-
-	if (redirection->flags & LB_TARGET_NET_ADDRESSES)
-	{
-		UINT32 length = sizeof(UINT32);
-
-		if (!Stream_EnsureRemainingCapacity(s, 2 * sizeof(UINT32)))
-			goto fail;
-
-		const size_t lstart = Stream_GetPosition(s);
-		Stream_Seek_UINT32(s); /* length of field */
-		Stream_Write_UINT32(s, redirection->TargetNetAddressesCount);
-		for (UINT32 i = 0; i < redirection->TargetNetAddressesCount; i++)
+		if (redirection->flags & LB_TARGET_NET_ADDRESS)
 		{
-			const SSIZE_T rcc =
-			    redir_write_string(LB_TARGET_NET_ADDRESSES, s, redirection->TargetNetAddresses[i]);
-			if (rcc < 0)
+			if (redir_write_string(LB_TARGET_NET_ADDRESS, s, redirection->TargetNetAddress) < 0)
 				goto fail;
-			length += (UINT32)rcc;
 		}
 
-		/* Write length field */
-		const size_t lend = Stream_GetPosition(s);
-		Stream_SetPosition(s, lstart);
-		Stream_Write_UINT32(s, length);
-		Stream_SetPosition(s, lend);
+		if (redirection->flags & LB_LOAD_BALANCE_INFO)
+		{
+			const UINT32 length = 13 + redirection->LoadBalanceInfoLength + 2;
+			if (!Stream_EnsureRemainingCapacity(s, length))
+				goto fail;
+			Stream_Write_UINT32(s, length);
+			Stream_Write(s, "Cookie: msts=", 13);
+			Stream_Write(s, redirection->LoadBalanceInfo, redirection->LoadBalanceInfoLength);
+			Stream_Write_UINT8(s, 0x0d);
+			Stream_Write_UINT8(s, 0x0a);
+		}
+
+		if (redirection->flags & LB_USERNAME)
+		{
+			if (redir_write_string(LB_USERNAME, s, redirection->Username) < 0)
+				goto fail;
+		}
+
+		if (redirection->flags & LB_DOMAIN)
+		{
+			if (redir_write_string(LB_DOMAIN, s, redirection->Domain) < 0)
+				goto fail;
+		}
+
+		if (redirection->flags & LB_PASSWORD)
+		{
+			/* Password is either UNICODE or opaque data */
+			if (!redir_write_data(LB_PASSWORD, s, redirection->PasswordLength,
+			                      redirection->Password))
+				goto fail;
+		}
+
+		if (redirection->flags & LB_TARGET_FQDN)
+		{
+			if (redir_write_string(LB_TARGET_FQDN, s, redirection->TargetFQDN) < 0)
+				goto fail;
+		}
+
+		if (redirection->flags & LB_TARGET_NETBIOS_NAME)
+		{
+			if (redir_write_string(LB_TARGET_NETBIOS_NAME, s, redirection->TargetNetBiosName) < 0)
+				goto fail;
+		}
+
+		if (redirection->flags & LB_CLIENT_TSV_URL)
+		{
+			if (!redir_write_data(LB_CLIENT_TSV_URL, s, redirection->TsvUrlLength,
+			                      redirection->TsvUrl))
+				goto fail;
+		}
+
+		if (redirection->flags & LB_REDIRECTION_GUID)
+		{
+			if (!redir_write_data(LB_REDIRECTION_GUID, s, redirection->RedirectionGuidLength,
+			                      redirection->RedirectionGuid))
+				goto fail;
+		}
+
+		if (redirection->flags & LB_TARGET_CERTIFICATE)
+		{
+			if (!rdp_redireciton_write_target_cert_stream(s, redirection))
+				goto fail;
+		}
+
+		if (redirection->flags & LB_TARGET_NET_ADDRESSES)
+		{
+			UINT32 length = sizeof(UINT32);
+
+			if (!Stream_EnsureRemainingCapacity(s, 2ull * sizeof(UINT32)))
+				goto fail;
+
+			const size_t lstart = Stream_GetPosition(s);
+			Stream_Seek_UINT32(s); /* length of field */
+			Stream_Write_UINT32(s, redirection->TargetNetAddressesCount);
+			for (UINT32 i = 0; i < redirection->TargetNetAddressesCount; i++)
+			{
+				const SSIZE_T rcc = redir_write_string(LB_TARGET_NET_ADDRESSES, s,
+				                                       redirection->TargetNetAddresses[i]);
+				if (rcc < 0)
+					goto fail;
+				length += (UINT32)rcc;
+			}
+
+			/* Write length field */
+			const size_t lend = Stream_GetPosition(s);
+			if (!Stream_SetPosition(s, lstart))
+				goto fail;
+			Stream_Write_UINT32(s, length);
+			if (!Stream_SetPosition(s, lend))
+				goto fail;
+		}
+
+		/* Padding 8 bytes */
+		if (!Stream_EnsureRemainingCapacity(s, 8))
+			goto fail;
+		Stream_Zero(s, 8);
+
+		{
+			const size_t end = Stream_GetPosition(s);
+			if (!Stream_SetPosition(s, lengthOffset))
+				goto fail;
+			Stream_Write_UINT16(s, (UINT16)(end - start));
+			if (!Stream_SetPosition(s, end))
+				goto fail;
+		}
 	}
-
-	/* Padding 8 bytes */
-	if (!Stream_EnsureRemainingCapacity(s, 8))
-		goto fail;
-	Stream_Zero(s, 8);
-
-	const size_t end = Stream_GetPosition(s);
-	Stream_SetPosition(s, lengthOffset);
-	Stream_Write_UINT16(s, (UINT16)(end - start));
-	Stream_SetPosition(s, end);
 
 	rc = TRUE;
 fail:
@@ -1202,8 +1234,8 @@ BOOL redirection_set_session_id(rdpRedirection* redirection, UINT32 session_id)
 
 static BOOL redirection_unsupported(const char* fkt, UINT32 flag, UINT32 mask)
 {
-	char buffer[1024] = { 0 };
-	char buffer2[1024] = { 0 };
+	char buffer[1024] = WINPR_C_ARRAY_INIT;
+	char buffer2[1024] = WINPR_C_ARRAY_INIT;
 	WLog_WARN(TAG, "[%s] supported flags are {%s}, have {%s}", fkt,
 	          rdp_redirection_flags_to_string(mask, buffer, sizeof(buffer)),
 	          rdp_redirection_flags_to_string(flag, buffer2, sizeof(buffer2)));

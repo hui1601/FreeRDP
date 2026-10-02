@@ -53,12 +53,12 @@
 
 #ifdef GOOGLE_PROFILER
 #include <gperftools/profiler.h>
-#define PROFILER_START(_prefix_)                                  \
-	do                                                            \
-	{                                                             \
-		char _path[PATH_MAX];                                     \
-		sprintf_s(_path, sizeof(_path), "./%s.prof", (_prefix_)); \
-		ProfilerStart(_path);                                     \
+#define PROFILER_START(_prefix_)                                        \
+	do                                                                  \
+	{                                                                   \
+		char _path[PATH_MAX] = WINPR_C_ARRAY_INIT;                      \
+		(void)sprintf_s(_path, sizeof(_path), "./%s.prof", (_prefix_)); \
+		ProfilerStart(_path);                                           \
 	} while (0);
 #define PROFILER_STOP   \
 	do                  \
@@ -77,8 +77,8 @@ extern void measure_floatprint(float t, char* output, size_t len);
 	{                                                  \
 		int _count = (_count_);                        \
 		int _loop;                                     \
-		char str1[32] = { 0 };                         \
-		char str2[32] = { 0 };                         \
+		char str1[32] = WINPR_C_ARRAY_INIT;            \
+		char str2[32] = WINPR_C_ARRAY_INIT;            \
 		char* _prefix = _strdup(_prefix_);             \
 		const UINT64 start = winpr_GetTickCount64NS(); \
 		PROFILER_START(_prefix);                       \

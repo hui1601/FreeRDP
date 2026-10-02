@@ -9,9 +9,6 @@
  */
 
 #import "TSXAdditions.h"
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/err.h>
 
 @implementation NSObject (TSXAdditions)
 
@@ -206,34 +203,6 @@
 		[hexString appendString:[NSString stringWithFormat:@"%02lx", (unsigned long)dataBuffer[i]]];
 
 	return [NSString stringWithString:hexString];
-}
-
-/* Code from http://cocoawithlove.com/2009/06/base64-encoding-options-on-mac-and.html */
-- (NSString *)base64EncodedString
-{
-	// Construct an OpenSSL context
-	BIO *context = BIO_new(BIO_s_mem());
-
-	// Tell the context to encode base64
-	BIO *command = BIO_new(BIO_f_base64());
-	context = BIO_push(command, context);
-	BIO_set_flags(context, BIO_FLAGS_BASE64_NO_NL);
-
-	// Encode all the data
-	ERR_clear_error();
-	BIO_write(context, [self bytes], [self length]);
-	(void)BIO_flush(context);
-
-	// Get the data out of the context
-	char *outputBuffer;
-	long outputLength = BIO_get_mem_data(context, &outputBuffer);
-	NSString *encodedString = [[NSString alloc] initWithBytes:outputBuffer
-	                                                   length:outputLength
-	                                                 encoding:NSASCIIStringEncoding];
-
-	BIO_free_all(context);
-
-	return encodedString;
 }
 
 @end

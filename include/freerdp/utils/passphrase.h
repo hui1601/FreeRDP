@@ -43,6 +43,7 @@ extern "C"
 	 *
 	 * @return The character read or \ref EOF in case of any failures
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API int freerdp_interruptible_getc(rdpContext* context, FILE* stream);
 
 	/** @brief read a line from \ref stream with (optinal) default value that can be manipulated.
@@ -58,6 +59,7 @@ extern "C"
 	 *
 	 * @return \b -1 in case of failure, otherwise \ref strlen of the result
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API SSIZE_T freerdp_interruptible_get_line(rdpContext* context, char** lineptr,
 	                                                   size_t* size, FILE* stream);
 
@@ -69,11 +71,42 @@ extern "C"
 	 * @param bufsiz The size of the buffer in bytes
 	 * @param from_stdin \b 0 if a terminal is expected, != 0 if data is read from stdin
 	 *
-	 * @return A pointer to \ref buf containing the password or \ref NULL in case of an error.
+	 * @return A pointer to \ref buf containing the password or \ref nullptr in case of an error.
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API const char* freerdp_passphrase_read(rdpContext* context, const char* prompt,
 	                                                char* buf, size_t bufsiz, int from_stdin);
 
+	/** @brief similar to \ref freerdp_passphrase_read and \ref freerdp_passphrase_read_tty but only
+	 * checks for environment variables
+	 *
+	 * @param context The RDP context to work on
+	 * @param prompt The prompt to show to the user
+	 * @param buf A pointer to a buffer that will receive the output
+	 * @param bufsiz The size of the buffer in bytes
+	 *
+	 * @return A pointer to \ref buf containing the password or \ref nullptr in case of an error.
+	 * @since version 3.28.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API const char* freerdp_passphrase_from_env(rdpContext* context, const char* prompt,
+	                                                    char* buf, size_t bufsiz);
+
+	/** @brief similar to \ref freerdp_passphrase_read and \ref freerdp_passphrase_from_env but only
+	 * checks for stdin
+	 *
+	 * @param context The RDP context to work on
+	 * @param prompt The prompt to show to the user
+	 * @param buf A pointer to a buffer that will receive the output
+	 * @param bufsiz The size of the buffer in bytes
+	 * @param from_stdin \b 0 if a terminal is expected, != 0 if data is read from stdin
+	 *
+	 * @return A pointer to \ref buf containing the password or \ref nullptr in case of an error.
+	 * @since version 3.28.0
+	 */
+	WINPR_ATTR_NODISCARD
+	FREERDP_API const char* freerdp_passphrase_read_tty(rdpContext* context, const char* prompt,
+	                                                    char* buf, size_t bufsiz, int from_stdin);
 #ifdef __cplusplus
 }
 #endif

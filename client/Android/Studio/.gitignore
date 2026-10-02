@@ -50,3 +50,5 @@ out.apk
 freeRDPCore/.cxx/
 freeRDPCore/build/
 freeRDPCore/src/main/jniLibs/
+freeRDPCore/src/main/cpp/external/
+

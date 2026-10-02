@@ -1,6 +1,7 @@
 
 #include <stdio.h>
 #include <winpr/crt.h>
+#include <winpr/file.h>
 #include <winpr/path.h>
 #include <winpr/tchar.h>
 #include <winpr/windows.h>
@@ -14,15 +15,15 @@ int TestLibraryGetProcAddress(int argc, char* argv[])
 	int a = 0;
 	int b = 0;
 	int c = 0;
-	HINSTANCE library = NULL;
-	TEST_AB_FN pFunctionA = NULL;
-	TEST_AB_FN pFunctionB = NULL;
-	LPCSTR SharedLibraryExtension = NULL;
-	CHAR LibraryPath[PATHCCH_MAX_CCH] = { 0 };
-	PCHAR p = NULL;
+	HINSTANCE library = nullptr;
+	TEST_AB_FN pFunctionA = nullptr;
+	TEST_AB_FN pFunctionB = nullptr;
+	LPCSTR SharedLibraryExtension = nullptr;
+	CHAR LibraryPath[MAX_PATH] = WINPR_C_ARRAY_INIT;
+	PCHAR p = nullptr;
 	WINPR_UNUSED(argc);
 	WINPR_UNUSED(argv);
-	if (!GetModuleFileNameA(NULL, LibraryPath, PATHCCH_MAX_CCH))
+	if (!GetModuleFileNameA(nullptr, LibraryPath, ARRAYSIZE(LibraryPath)))
 	{
 		const UINT32 err = GetLastError();
 		const HRESULT herr = HRESULT_FROM_WIN32(err);
@@ -40,9 +41,12 @@ int TestLibraryGetProcAddress(int argc, char* argv[])
 	}
 
 	*p = 0;
-	NativePathCchAppendA(LibraryPath, PATHCCH_MAX_CCH, "TestLibraryA");
+	if (FAILED(NativePathCchAppendA(LibraryPath, ARRAYSIZE(LibraryPath), "TestLibraryA")))
+		return -1;
 	SharedLibraryExtension = PathGetSharedLibraryExtensionA(PATH_SHARED_LIB_EXT_WITH_DOT);
-	NativePathCchAddExtensionA(LibraryPath, PATHCCH_MAX_CCH, SharedLibraryExtension);
+	if (FAILED(NativePathCchAddExtensionA(LibraryPath, ARRAYSIZE(LibraryPath),
+	                                      SharedLibraryExtension)))
+		return -1;
 	printf("%s: Loading Library: '%s'\n", __func__, LibraryPath);
 
 	if (!(library = LoadLibraryA(LibraryPath)))

@@ -5,7 +5,11 @@ disable_warnings_for_directory(${CMAKE_CURRENT_BINARY_DIR})
 
 set(${MODULE_PREFIX}_DRIVER ${MODULE_NAME}.c)
 
-set(${MODULE_PREFIX}_TESTS TestRingBuffer.c TestPodArrays.c TestEncodedTypes.c)
+set(${MODULE_PREFIX}_TESTS TestRingBuffer.c TestPodArrays.c TestEncodedTypes.c TestSmartcardPack.c
+                           TestSmartcardOperations.c
+)
+
+set(FUZZERS TestFuzzSmartcardOperations.c)
 
 create_test_sourcelist(${MODULE_PREFIX}_SRCS ${${MODULE_PREFIX}_DRIVER} ${${MODULE_PREFIX}_TESTS})
 
@@ -15,6 +19,9 @@ target_link_libraries(${MODULE_NAME} PRIVATE freerdp winpr)
 if(NOT WIN32)
   target_link_libraries(${MODULE_NAME} PRIVATE m)
 endif()
+
+include(AddFuzzerTest)
+add_fuzzer_test("${FUZZERS}" "freerdp winpr")
 
 set_target_properties(${MODULE_NAME} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${TESTING_OUTPUT_DIRECTORY}")
 

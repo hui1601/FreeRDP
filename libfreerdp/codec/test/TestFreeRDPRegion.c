@@ -42,9 +42,9 @@ static BOOL compareRectangles(const RECTANGLE_16* src1, const RECTANGLE_16* src2
 
 static int test_basic(void)
 {
-	REGION16 region = { 0 };
+	REGION16 region = WINPR_C_ARRAY_INIT;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	/* R1 + R2 ==> disjointed rects */
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
@@ -73,7 +73,11 @@ static int test_basic(void)
 
 	/* clear region */
 	region16_clear(&region);
-	region16_rects(&region, &nbRects);
+	if (!region16_rects(&region, &nbRects))
+	{
+		if (nbRects != 0)
+			goto out;
+	}
 
 	if (nbRects)
 		goto out;
@@ -88,7 +92,7 @@ static int test_r1_r3(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r3 = { 150, 151, 250, 251 };
@@ -144,7 +148,7 @@ static int test_r9_r10(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	/*
 	 * +===============================================================
@@ -190,7 +194,7 @@ static int test_r1_r5(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r5 = { 150, 121, 300, 131 };
@@ -230,9 +234,9 @@ out:
 
 static int test_r1_r6(void)
 {
-	REGION16 region = { 0 };
+	REGION16 region = WINPR_C_ARRAY_INIT;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r6 = { 150, 121, 170, 131 };
@@ -273,7 +277,7 @@ static int test_r1_r2_r4(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r2 = { 150, 301, 250, 401 };
@@ -323,7 +327,7 @@ static int test_r1_r7_r8(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r7 = { 300, 101, 500, 201 };
@@ -405,7 +409,7 @@ static int test_r1_r2_r3_r4(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r2 = { 150, 301, 250, 401 };
@@ -487,7 +491,7 @@ static int test_from_weston(void)
 	 */
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 0, 640, 32 };
 	RECTANGLE_16 r2 = { 236, 169, 268, 201 };
@@ -535,7 +539,7 @@ static int test_r1_inter_r3(void)
 	REGION16 region;
 	REGION16 intersection;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r3 = { 150, 151, 250, 251 };
@@ -583,7 +587,7 @@ static int test_r1_r3_inter_r11(void)
 	REGION16 region;
 	REGION16 intersection;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 r1 = { 0, 101, 200, 201 };
 	RECTANGLE_16 r3 = { 150, 151, 250, 251 };
@@ -644,7 +648,7 @@ static int test_norbert_case(void)
 	REGION16 region;
 	REGION16 intersection;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 inRectangles[5] = { { 1680, 0, 1920, 242 },
 		                             { 294, 242, 971, 776 },
@@ -714,7 +718,7 @@ static int test_norbert2_case(void)
 {
 	REGION16 region;
 	int retCode = -1;
-	const RECTANGLE_16* rects = NULL;
+	const RECTANGLE_16* rects = nullptr;
 	UINT32 nbRects = 0;
 	RECTANGLE_16 rect1 = { 464, 696, 476, 709 };
 	RECTANGLE_16 rect2 = { 0, 0, 1024, 32 };
@@ -832,7 +836,7 @@ typedef int (*TestFunction)(void);
 struct UnitaryTest
 {
 	const char* name;
-	TestFunction func;
+	WINPR_ATTR_NODISCARD TestFunction func;
 };
 
 static struct UnitaryTest tests[] = { { "Basic trivial tests", test_basic },
@@ -850,7 +854,7 @@ static struct UnitaryTest tests[] = { { "Basic trivial tests", test_basic },
 	                                  { "norbert's case 2", test_norbert2_case },
 	                                  { "empty rectangle case", test_empty_rectangle },
 
-	                                  { NULL, NULL } };
+	                                  { nullptr, nullptr } };
 
 int TestFreeRDPRegion(int argc, char* argv[])
 {

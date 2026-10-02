@@ -38,13 +38,8 @@
 #pragma clang diagnostic pop
 #endif
 
-#if defined(__FreeBSD__) || defined(__DragonFly__)
+#ifdef __FreeBSD__
 #define USE_SHM
-#endif
-
-/* uClibc and uClibc-ng don't provide O_TMPFILE */
-#if !defined(O_TMPFILE) && !defined(__FreeBSD__)
-#define O_TMPFILE (020000000 | O_DIRECTORY)
 #endif
 
 #include <sys/types.h>
@@ -61,6 +56,7 @@
 #include <sys/epoll.h>
 #include <sys/stat.h>
 
+#include <winpr/wtypes.h>
 #include <uwac/config.h>
 
 #include "uwac-os.h"
@@ -120,9 +116,9 @@ int uwac_os_dupfd_cloexec(int fd, long minfd)
 static ssize_t recvmsg_cloexec_fallback(int sockfd, struct msghdr* msg, int flags)
 {
 	ssize_t len = 0;
-	struct cmsghdr* cmsg = NULL;
-	unsigned char* data = NULL;
-	int* end = NULL;
+	struct cmsghdr* cmsg = nullptr;
+	unsigned char* data = nullptr;
+	int* end = nullptr;
 	len = recvmsg(sockfd, msg, flags);
 
 	if (len == -1)
@@ -133,7 +129,7 @@ static ssize_t recvmsg_cloexec_fallback(int sockfd, struct msghdr* msg, int flag
 
 	cmsg = CMSG_FIRSTHDR(msg);
 
-	for (; cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg))
+	for (; cmsg != nullptr; cmsg = CMSG_NXTHDR(msg, cmsg))
 	{
 		if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS)
 			continue;
@@ -236,7 +232,7 @@ int uwac_create_anonymous_file(off_t size)
 {
 	static const char template[] = "/weston-shared-XXXXXX";
 	size_t length = 0;
-	char* name = NULL;
+	char* name = nullptr;
 	int fd = 0;
 	int ret = 0;
 	// NOLINTNEXTLINE(concurrency-mt-unsafe)
@@ -252,9 +248,9 @@ int uwac_create_anonymous_file(off_t size)
 	fd = open(path, O_TMPFILE | O_RDWR | O_EXCL, 0600);
 #else
 	/*
-	 * Some platforms (e.g. FreeBSD) won't support O_TMPFILE and can't
-	 * reasonably emulate it at first blush.  Opt to make them rely on
-	 * the create_tmpfile_cloexec() path instead.
+	 * Some platforms will not support O_TMPFILE and cannot
+	 * reasonably emulate it at first blush. Opt to make them
+	 * rely on the create_tmpfile_cloexec() path instead.
 	 */
 	fd = -1;
 #endif

@@ -51,14 +51,16 @@
 #define CONFIG_PRINT_SECTION(section) WLog_INFO(TAG, "\t%s:", section)
 #define CONFIG_PRINT_SECTION_KEY(section, key) WLog_INFO(TAG, "\t%s/%s:", section, key)
 #define CONFIG_PRINT_STR(config, key) WLog_INFO(TAG, "\t\t%s: %s", #key, (config)->key)
-#define CONFIG_PRINT_STR_CONTENT(config, key) \
-	WLog_INFO(TAG, "\t\t%s: %s", #key, (config)->key ? "set" : NULL)
+#define CONFIG_PRINT_SECRET_STR(config, key) \
+	WLog_INFO(TAG, "\t\t%s: %s", #key, (config)->key ? "********" : nullptr)
 #define CONFIG_PRINT_BOOL(config, key) WLog_INFO(TAG, "\t\t%s: %s", #key, boolstr((config)->key))
 #define CONFIG_PRINT_UINT16(config, key) WLog_INFO(TAG, "\t\t%s: %" PRIu16 "", #key, (config)->key)
 #define CONFIG_PRINT_UINT32(config, key) WLog_INFO(TAG, "\t\t%s: %" PRIu32 "", #key, (config)->key)
 
 static const char* bool_str_true = "true";
 static const char* bool_str_false = "false";
+
+WINPR_ATTR_NODISCARD
 static const char* boolstr(BOOL rc)
 {
 	return rc ? bool_str_true : bool_str_false;
@@ -67,6 +69,7 @@ static const char* boolstr(BOOL rc)
 static const char* section_server = "Server";
 static const char* key_host = "Host";
 static const char* key_port = "Port";
+static const char* key_sam_file = "SamFile";
 
 static const char* section_target = "Target";
 static const char* key_target_fixed = "FixedTarget";
@@ -74,10 +77,24 @@ static const char* key_target_user = "User";
 static const char* key_target_pwd = "Password";
 static const char* key_target_domain = "Domain";
 static const char* key_target_tls_seclevel = "TlsSecLevel";
+static const char* key_target_scard_auth = "SmartcardAuth";
+static const char* key_target_scard_cert = "SmartcardCert";
+static const char* key_target_scard_key = "SmartcardKey";
+static const char* key_target_scard_pem_cert = "SmartcardCertPEMContent";
+static const char* key_target_scard_pem_key = "SmartcardKeyPEMContent";
+static const char* key_target_cert_policy = "CertificatePolicy"; /** @since version 3.32.0 */
+static const char* key_target_cert_pem = "CertificatePEM";       /** @since version 3.32.0 */
+static const char* key_target_cert_pem_content =
+    "CertificatePEMContent";                                 /** @since version 3.32.0 */
+static const char* key_target_cert_hash = "CertificateHash"; /** @since version 3.32.0 */
 
 static const char* section_plugins = "Plugins";
 static const char* key_plugins_modules = "Modules";
 static const char* key_plugins_required = "Required";
+
+static const char* section_codecs = "Codecs";
+static const char* key_codecs_rfx = "RFX";
+static const char* key_codecs_nsc = "NSC";
 
 static const char* section_channels = "Channels";
 static const char* key_channels_gfx = "GFX";
@@ -100,9 +117,11 @@ static const char* key_input_multitouch = "Multitouch";
 
 static const char* section_security = "Security";
 static const char* key_security_server_nla = "ServerNlaSecurity";
+static const char* key_security_server_ext = "ServerExtSecurity";
 static const char* key_security_server_tls = "ServerTlsSecurity";
 static const char* key_security_server_rdp = "ServerRdpSecurity";
 static const char* key_security_client_nla = "ClientNlaSecurity";
+static const char* key_security_client_ext = "ClientExtSecurity";
 static const char* key_security_client_tls = "ClientTlsSecurity";
 static const char* key_security_client_rdp = "ClientRdpSecurity";
 static const char* key_security_client_fallback = "ClientAllowFallbackToTls";
@@ -113,26 +132,31 @@ static const char* key_private_key_content = "PrivateKeyContent";
 static const char* key_cert_file = "CertificateFile";
 static const char* key_cert_content = "CertificateContent";
 
+WINPR_ATTR_MALLOC(free, 1)
+static char* pf_config_decode_base64(const char* data, const char* name, size_t* pLength);
+
 WINPR_ATTR_MALLOC(CommandLineParserFree, 1)
+WINPR_ATTR_NODISCARD
 static char** pf_config_parse_comma_separated_list(const char* list, size_t* count)
 {
 	if (!list || !count)
-		return NULL;
+		return nullptr;
 
 	if (strlen(list) == 0)
 	{
 		*count = 0;
-		return NULL;
+		return nullptr;
 	}
 
 	return CommandLineParseCommaSeparatedValues(list, count);
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_get_uint16(wIniFile* ini, const char* section, const char* key,
                                  UINT16* result, BOOL required)
 {
 	int val = 0;
-	const char* strval = NULL;
+	const char* strval = nullptr;
 
 	WINPR_ASSERT(result);
 
@@ -142,6 +166,9 @@ static BOOL pf_config_get_uint16(wIniFile* ini, const char* section, const char*
 		WLog_ERR(TAG, "key '%s.%s' does not exist.", section, key);
 		return FALSE;
 	}
+	else if (!strval)
+		goto out;
+
 	val = IniFile_GetKeyValueInt(ini, section, key);
 	if ((val <= 0) || (val > UINT16_MAX))
 	{
@@ -149,10 +176,12 @@ static BOOL pf_config_get_uint16(wIniFile* ini, const char* section, const char*
 		return FALSE;
 	}
 
+out:
 	*result = (UINT16)val;
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_get_uint32(wIniFile* ini, const char* section, const char* key,
                                  UINT32* result, BOOL required)
 {
@@ -177,10 +206,11 @@ static BOOL pf_config_get_uint32(wIniFile* ini, const char* section, const char*
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_get_bool(wIniFile* ini, const char* section, const char* key, BOOL fallback)
 {
 	int num_value = 0;
-	const char* str_value = NULL;
+	const char* str_value = nullptr;
 
 	str_value = IniFile_GetKeyValueString(ini, section, key);
 	if (!str_value)
@@ -197,60 +227,75 @@ static BOOL pf_config_get_bool(wIniFile* ini, const char* section, const char* k
 
 	num_value = IniFile_GetKeyValueInt(ini, section, key);
 
-	if (num_value != 0)
-		return TRUE;
-
-	return FALSE;
+	return (num_value != 0);
 }
 
+WINPR_ATTR_NODISCARD
 static const char* pf_config_get_str(wIniFile* ini, const char* section, const char* key,
                                      BOOL required)
 {
-	const char* value = NULL;
-
-	value = IniFile_GetKeyValueString(ini, section, key);
+	const char* value = IniFile_GetKeyValueString(ini, section, key);
 
 	if (!value)
 	{
 		if (required)
 			WLog_ERR(TAG, "key '%s.%s' not found.", section, key);
-		return NULL;
+		return nullptr;
 	}
 
 	return value;
 }
 
+WINPR_ATTR_NODISCARD
+static BOOL pf_config_copy_string(char** dst, const char* src)
+{
+	WINPR_ASSERT(dst);
+	*dst = nullptr;
+	if (src)
+		*dst = _strdup(src);
+	return TRUE;
+}
+
+WINPR_ATTR_NODISCARD
+static BOOL pf_config_free_and_copy_string(char** dst, const char* src)
+{
+	WINPR_ASSERT(dst);
+	winpr_zfree(*dst);
+	return pf_config_copy_string(dst, src);
+}
+
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_server(wIniFile* ini, proxyConfig* config)
 {
-	const char* host = NULL;
-
 	WINPR_ASSERT(config);
-	host = pf_config_get_str(ini, section_server, key_host, FALSE);
+	const char* host = pf_config_get_str(ini, section_server, key_host, FALSE);
 
-	if (!host)
-		return TRUE;
+	if (host)
+	{
+		if (!pf_config_free_and_copy_string(&config->Host, host))
+			return FALSE;
+	}
 
-	config->Host = _strdup(host);
-
-	if (!config->Host)
+	if (!pf_config_get_uint16(ini, section_server, key_port, &config->Port, FALSE))
 		return FALSE;
 
-	if (!pf_config_get_uint16(ini, section_server, key_port, &config->Port, TRUE))
-		return FALSE;
+	const char* sam = pf_config_get_str(ini, section_server, key_sam_file, FALSE);
+	if (sam)
+	{
+		if (!pf_config_free_and_copy_string(&config->SamFile, sam))
+			return FALSE;
+	}
 
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_target(wIniFile* ini, proxyConfig* config)
 {
-	const char* target_value = NULL;
+	const char* target_value = nullptr;
 
 	WINPR_ASSERT(config);
 	config->FixedTarget = pf_config_get_bool(ini, section_target, key_target_fixed, FALSE);
-
-	if (!pf_config_get_uint16(ini, section_target, key_port, &config->TargetPort,
-	                          config->FixedTarget))
-		return FALSE;
 
 	if (!pf_config_get_uint32(ini, section_target, key_target_tls_seclevel,
 	                          &config->TargetTlsSecLevel, FALSE))
@@ -258,50 +303,197 @@ static BOOL pf_config_load_target(wIniFile* ini, proxyConfig* config)
 
 	if (config->FixedTarget)
 	{
-		target_value = pf_config_get_str(ini, section_target, key_host, TRUE);
-		if (!target_value)
+		if (!pf_config_get_uint16(ini, section_target, key_port, &config->TargetPort, FALSE))
 			return FALSE;
 
-		config->TargetHost = _strdup(target_value);
-		if (!config->TargetHost)
-			return FALSE;
+		target_value = pf_config_get_str(ini, section_target, key_host, FALSE);
+		if (target_value)
+		{
+			if (!pf_config_free_and_copy_string(&config->TargetHost, target_value))
+				return FALSE;
+		}
 	}
 
 	target_value = pf_config_get_str(ini, section_target, key_target_user, FALSE);
 	if (target_value)
 	{
-		config->TargetUser = _strdup(target_value);
-		if (!config->TargetUser)
+		if (!pf_config_free_and_copy_string(&config->TargetUser, target_value))
 			return FALSE;
 	}
 
 	target_value = pf_config_get_str(ini, section_target, key_target_pwd, FALSE);
 	if (target_value)
 	{
-		config->TargetPassword = _strdup(target_value);
-		if (!config->TargetPassword)
+		if (!pf_config_free_and_copy_string(&config->TargetPassword, target_value))
 			return FALSE;
 	}
 
 	target_value = pf_config_get_str(ini, section_target, key_target_domain, FALSE);
 	if (target_value)
 	{
-		config->TargetDomain = _strdup(target_value);
-		if (!config->TargetDomain)
+		if (!pf_config_free_and_copy_string(&config->TargetDomain, target_value))
 			return FALSE;
+	}
+
+	config->TargetSmartcardAuth =
+	    pf_config_get_bool(ini, section_target, key_target_scard_auth, FALSE);
+
+	target_value = pf_config_get_str(ini, section_target, key_target_scard_cert, FALSE);
+	if (target_value)
+	{
+		size_t len = 0;
+		char* pem = crypto_read_pem(target_value, &len);
+		if (!pem)
+			return FALSE;
+		winpr_znfree(config->TargetSmartcardCert, config->TargetSmartcardCertLength);
+		config->TargetSmartcardCert = pem;
+		config->TargetSmartcardCertLength = len;
+	}
+
+	{
+		const char* pem_value =
+		    pf_config_get_str(ini, section_target, key_target_scard_pem_cert, FALSE);
+		if (pem_value)
+		{
+			if (target_value)
+				WLog_WARN(TAG, "In section [%s] both, '%s' and '%s' are provided. Ignoring %s",
+				          section_target, key_target_scard_cert, key_target_scard_pem_cert,
+				          key_target_scard_cert);
+			winpr_znfree(config->TargetSmartcardCert, config->TargetSmartcardCertLength);
+			size_t len = 0;
+			config->TargetSmartcardCert =
+			    pf_config_decode_base64(pem_value, key_target_scard_pem_cert, &len);
+			if (!config->TargetSmartcardCert)
+				return FALSE;
+			config->TargetSmartcardCertLength = len;
+		}
+	}
+
+	target_value = pf_config_get_str(ini, section_target, key_target_scard_key, FALSE);
+	if (target_value)
+	{
+		size_t len = 0;
+		char* pem = crypto_read_pem(target_value, &len);
+		if (!pem)
+			return FALSE;
+		winpr_znfree(config->TargetSmartcardKey, config->TargetSmartcardKeyLength);
+		config->TargetSmartcardKey = pem;
+		config->TargetSmartcardKeyLength = len;
+	}
+
+	{
+		const char* pem_value =
+		    pf_config_get_str(ini, section_target, key_target_scard_pem_key, FALSE);
+		if (pem_value)
+		{
+			if (target_value)
+				WLog_WARN(TAG, "In section [%s] both, '%s' and '%s' are provided. Ignoring %s",
+				          section_target, key_target_scard_key, key_target_scard_pem_key,
+				          key_target_scard_key);
+			winpr_znfree(config->TargetSmartcardKey, config->TargetSmartcardKeyLength);
+
+			size_t len = 0;
+			config->TargetSmartcardKey =
+			    pf_config_decode_base64(pem_value, key_target_scard_pem_key, &len);
+			if (!config->TargetSmartcardKey)
+				return FALSE;
+			config->TargetSmartcardKeyLength = len;
+		}
+	}
+
+	target_value = pf_config_get_str(ini, section_target, key_target_cert_pem, FALSE);
+	if (target_value)
+	{
+		size_t len = 0;
+		char* pem = crypto_read_pem(target_value, &len);
+		if (!pem)
+			return FALSE;
+		winpr_znfree(config->TargetCertPEM, config->TargetCertPEMLength);
+		config->TargetCertPEM = pem;
+		config->TargetCertPEMLength = len;
+	}
+
+	target_value = pf_config_get_str(ini, section_target, key_target_cert_pem_content, FALSE);
+	if (target_value)
+	{
+		const char* pem_value = pf_config_get_str(ini, section_target, key_target_cert_pem, FALSE);
+		if (pem_value)
+			WLog_WARN(TAG, "In section [%s] both, '%s' and '%s' are provided. Ignoring %s",
+			          section_target, key_target_cert_pem, key_target_cert_pem_content,
+			          key_target_cert_pem);
+
+		winpr_znfree(config->TargetCertPEM, config->TargetCertPEMLength);
+		config->TargetCertPEM = pf_config_decode_base64(target_value, "TargetCertificateContent",
+		                                                &config->TargetCertPEMLength);
+
+		if (!config->TargetCertPEM || (config->TargetCertPEMLength == 0))
+			return FALSE;
+	}
+
+	target_value = pf_config_get_str(ini, section_target, key_target_cert_hash, FALSE);
+	if (target_value)
+	{
+		const char* sep = strchr(target_value, ':');
+		char hash[32] = WINPR_C_ARRAY_INIT;
+		if (sep)
+		{
+			const size_t len = WINPR_ASSERTING_INT_CAST(size_t, sep - target_value);
+			if (len < sizeof(hash))
+			{
+				memcpy(hash, target_value, len);
+			}
+		}
+		if (!sep || (winpr_md_type_from_string(hash) == WINPR_MD_NONE))
+		{
+			WLog_WARN(TAG,
+			          "In section [%s] key %s value %s is invalid. Format required is '<hash "
+			          "type>:<hash value>'.",
+			          section_target, key_target_cert_hash, target_value);
+			return FALSE;
+		}
+		winpr_zfree(config->TargetCertHash);
+		config->TargetCertHash = _strdup(target_value);
+		if (!config->TargetCertHash)
+			return FALSE;
+	}
+
+	target_value = pf_config_get_str(ini, section_target, key_target_cert_policy, FALSE);
+	if (target_value)
+	{
+		config->TargetCertPolicy = pf_config_policy_from_str(target_value);
+		if (config->TargetCertPolicy == FREERDP_PROXY_CERT_POLICY_PINNED)
+		{
+			if (!config->TargetCertHash && !config->TargetCertPEM)
+			{
+				WLog_WARN(TAG, "In section [%s] key %s value %s requires one of %s, %s or %s set.",
+				          section_target, key_target_cert_policy, target_value,
+				          key_target_cert_hash, key_target_cert_pem, key_target_cert_pem_content);
+				return FALSE;
+			}
+		}
 	}
 
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
+static BOOL pf_config_load_codecs(wIniFile* ini, proxyConfig* config)
+{
+	WINPR_ASSERT(config);
+	config->RFX = pf_config_get_bool(ini, section_codecs, key_codecs_rfx, TRUE);
+	config->NSC = pf_config_get_bool(ini, section_codecs, key_codecs_nsc, TRUE);
+	return TRUE;
+}
+
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_channels(wIniFile* ini, proxyConfig* config)
 {
 	WINPR_ASSERT(config);
 	config->GFX = pf_config_get_bool(ini, section_channels, key_channels_gfx, TRUE);
 	config->DisplayControl = pf_config_get_bool(ini, section_channels, key_channels_disp, TRUE);
 	config->Clipboard = pf_config_get_bool(ini, section_channels, key_channels_clip, FALSE);
-	config->AudioOutput = pf_config_get_bool(ini, section_channels, key_channels_mic, TRUE);
-	config->AudioInput = pf_config_get_bool(ini, section_channels, key_channels_sound, TRUE);
+	config->AudioOutput = pf_config_get_bool(ini, section_channels, key_channels_sound, TRUE);
+	config->AudioInput = pf_config_get_bool(ini, section_channels, key_channels_mic, TRUE);
 	config->DeviceRedirection = pf_config_get_bool(ini, section_channels, key_channels_rdpdr, TRUE);
 	config->VideoRedirection = pf_config_get_bool(ini, section_channels, key_channels_video, TRUE);
 	config->CameraRedirection =
@@ -319,6 +511,7 @@ static BOOL pf_config_load_channels(wIniFile* ini, proxyConfig* config)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_input(wIniFile* ini, proxyConfig* config)
 {
 	WINPR_ASSERT(config);
@@ -328,6 +521,7 @@ static BOOL pf_config_load_input(wIniFile* ini, proxyConfig* config)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_security(wIniFile* ini, proxyConfig* config)
 {
 	WINPR_ASSERT(config);
@@ -335,6 +529,8 @@ static BOOL pf_config_load_security(wIniFile* ini, proxyConfig* config)
 	    pf_config_get_bool(ini, section_security, key_security_server_tls, TRUE);
 	config->ServerNlaSecurity =
 	    pf_config_get_bool(ini, section_security, key_security_server_nla, FALSE);
+	config->ServerExtSecurity =
+	    pf_config_get_bool(ini, section_security, key_security_server_ext, FALSE);
 	config->ServerRdpSecurity =
 	    pf_config_get_bool(ini, section_security, key_security_server_rdp, TRUE);
 
@@ -342,6 +538,8 @@ static BOOL pf_config_load_security(wIniFile* ini, proxyConfig* config)
 	    pf_config_get_bool(ini, section_security, key_security_client_tls, TRUE);
 	config->ClientNlaSecurity =
 	    pf_config_get_bool(ini, section_security, key_security_client_nla, TRUE);
+	config->ClientExtSecurity =
+	    pf_config_get_bool(ini, section_security, key_security_client_ext, TRUE);
 	config->ClientRdpSecurity =
 	    pf_config_get_bool(ini, section_security, key_security_client_rdp, TRUE);
 	config->ClientAllowFallbackToTls =
@@ -349,10 +547,11 @@ static BOOL pf_config_load_security(wIniFile* ini, proxyConfig* config)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_modules(wIniFile* ini, proxyConfig* config)
 {
-	const char* modules_to_load = NULL;
-	const char* required_modules = NULL;
+	const char* modules_to_load = nullptr;
+	const char* required_modules = nullptr;
 
 	modules_to_load = pf_config_get_str(ini, section_plugins, key_plugins_modules, FALSE);
 	required_modules = pf_config_get_str(ini, section_plugins, key_plugins_required, FALSE);
@@ -365,18 +564,18 @@ static BOOL pf_config_load_modules(wIniFile* ini, proxyConfig* config)
 	return TRUE;
 }
 
-static char* pf_config_decode_base64(const char* data, const char* name, size_t* pLength)
+char* pf_config_decode_base64(const char* data, const char* name, size_t* pLength)
 {
 	const char* headers[] = { "-----BEGIN PUBLIC KEY-----", "-----BEGIN RSA PUBLIC KEY-----",
 		                      "-----BEGIN CERTIFICATE-----", "-----BEGIN PRIVATE KEY-----",
 		                      "-----BEGIN RSA PRIVATE KEY-----" };
 
 	size_t decoded_length = 0;
-	char* decoded = NULL;
+	char* decoded = nullptr;
 	if (!data)
 	{
-		WLog_ERR(TAG, "Invalid base64 data [%p] for %s", data, name);
-		return NULL;
+		WLog_ERR(TAG, "Invalid base64 data [nullptr] for %s", name);
+		return nullptr;
 	}
 
 	WINPR_ASSERT(name);
@@ -400,7 +599,7 @@ static char* pf_config_decode_base64(const char* data, const char* name, size_t*
 			/* Extract header for log message
 			 * expected format is '----- SOMETEXT -----'
 			 */
-			char hdr[128] = { 0 };
+			char hdr[128] = WINPR_C_ARRAY_INIT;
 			const char* end = strchr(&data[5], '-');
 			if (end)
 			{
@@ -427,18 +626,19 @@ static char* pf_config_decode_base64(const char* data, const char* name, size_t*
 	if (!decoded || decoded_length == 0)
 	{
 		WLog_ERR(TAG, "Failed to decode base64 data of length %" PRIuz " for %s", length, name);
-		free(decoded);
-		return NULL;
+		winpr_zfree(decoded);
+		return nullptr;
 	}
 
 	*pLength = strnlen(decoded, decoded_length) + 1;
 	return decoded;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_load_certificates(wIniFile* ini, proxyConfig* config)
 {
-	const char* tmp1 = NULL;
-	const char* tmp2 = NULL;
+	const char* tmp1 = nullptr;
+	const char* tmp2 = nullptr;
 
 	WINPR_ASSERT(ini);
 	WINPR_ASSERT(config);
@@ -546,7 +746,7 @@ static BOOL pf_config_load_certificates(wIniFile* ini, proxyConfig* config)
 
 proxyConfig* server_config_load_ini(wIniFile* ini)
 {
-	proxyConfig* config = NULL;
+	proxyConfig* config = nullptr;
 
 	WINPR_ASSERT(ini);
 
@@ -561,6 +761,9 @@ proxyConfig* server_config_load_ini(wIniFile* ini)
 			goto out;
 
 		if (!pf_config_load_target(ini, config))
+			goto out;
+
+		if (!pf_config_load_codecs(ini, config))
 			goto out;
 
 		if (!pf_config_load_channels(ini, config))
@@ -588,7 +791,7 @@ out:
 	pf_server_config_free(config);
 	WINPR_PRAGMA_DIAG_POP
 
-	return NULL;
+	return nullptr;
 }
 
 BOOL pf_server_config_dump(const char* file)
@@ -603,6 +806,9 @@ BOOL pf_server_config_dump(const char* file)
 		goto fail;
 	if (IniFile_SetKeyValueInt(ini, section_server, key_port, 3389) < 0)
 		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_server, key_sam_file,
+	                              "optional/path/some/file.sam") < 0)
+		goto fail;
 
 	/* Target configuration */
 	if (IniFile_SetKeyValueString(ini, section_target, key_host, "somehost.example.com") < 0)
@@ -612,6 +818,46 @@ BOOL pf_server_config_dump(const char* file)
 	if (IniFile_SetKeyValueString(ini, section_target, key_target_fixed, bool_str_true) < 0)
 		goto fail;
 	if (IniFile_SetKeyValueInt(ini, section_target, key_target_tls_seclevel, 1) < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_user, "optionaltargetuser") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_domain, "optionaltargetdomain") <
+	    0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_pwd, "optionaltargetpassword") <
+	    0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_scard_auth, bool_str_false) < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_scard_cert,
+	                              "optional/path/some/file.pem.crt") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_scard_pem_cert,
+	                              "<base64 encoded PEM>") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_scard_key,
+	                              "optional/path/some/file.pem.key") < 0)
+		goto fail;
+
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_scard_pem_key,
+	                              "<base64 encoded PEM>") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_cert_policy,
+	                              "[deny|allow|pinned]") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_cert_pem,
+	                              "optional/path/some/file.pem.crt") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_cert_pem_content,
+	                              "<base64 encoded PEM>") < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_target, key_target_cert_hash,
+	                              "<hash type>:<hash hex string>") < 0)
+		goto fail;
+	/* Codec configuration */
+	if (IniFile_SetKeyValueString(ini, section_codecs, key_codecs_rfx, bool_str_true) < 0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_codecs, key_codecs_nsc, bool_str_true) < 0)
 		goto fail;
 
 	/* Channel configuration */
@@ -656,6 +902,9 @@ BOOL pf_server_config_dump(const char* file)
 	if (IniFile_SetKeyValueString(ini, section_security, key_security_server_nla, bool_str_false) <
 	    0)
 		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_security, key_security_server_ext, bool_str_false) <
+	    0)
+		goto fail;
 	if (IniFile_SetKeyValueString(ini, section_security, key_security_server_rdp, bool_str_true) <
 	    0)
 		goto fail;
@@ -664,6 +913,9 @@ BOOL pf_server_config_dump(const char* file)
 	    0)
 		goto fail;
 	if (IniFile_SetKeyValueString(ini, section_security, key_security_client_nla, bool_str_true) <
+	    0)
+		goto fail;
+	if (IniFile_SetKeyValueString(ini, section_security, key_security_client_ext, bool_str_true) <
 	    0)
 		goto fail;
 	if (IniFile_SetKeyValueString(ini, section_security, key_security_client_rdp, bool_str_true) <
@@ -686,19 +938,33 @@ BOOL pf_server_config_dump(const char* file)
 	                              "<absolute path to some certificate file> OR") < 0)
 		goto fail;
 	if (IniFile_SetKeyValueString(ini, section_certificates, key_cert_content,
-	                              "<Contents of some certificate file in PEM format>") < 0)
+	                              "<base64 encoded PEM>") < 0)
 		goto fail;
 
 	if (IniFile_SetKeyValueString(ini, section_certificates, key_private_key_file,
 	                              "<absolute path to some private key file> OR") < 0)
 		goto fail;
 	if (IniFile_SetKeyValueString(ini, section_certificates, key_private_key_content,
-	                              "<Contents of some private key file in PEM format>") < 0)
+	                              "<base64 encoded PEM>") < 0)
 		goto fail;
 
-	/* store configuration */
-	if (IniFile_WriteFile(ini, file) < 0)
-		goto fail;
+	if ((strcmp("stdout", file) == 0) || (strcmp("stderr", file) == 0))
+	{
+		char* buffer = IniFile_WriteBuffer(ini);
+		if (!buffer)
+			goto fail;
+		FILE* fp = stderr;
+		if (strcmp("stdout", file) == 0)
+			fp = stdout;
+		(void)fprintf(fp, "%s", buffer);
+		winpr_zfree(buffer);
+	}
+	else
+	{
+		/* store configuration */
+		if (IniFile_WriteFile(ini, file) < 0)
+			goto fail;
+	}
 
 	rc = TRUE;
 
@@ -709,15 +975,15 @@ fail:
 
 proxyConfig* pf_server_config_load_buffer(const char* buffer)
 {
-	proxyConfig* config = NULL;
-	wIniFile* ini = NULL;
+	proxyConfig* config = nullptr;
+	wIniFile* ini = nullptr;
 
 	ini = IniFile_New();
 
 	if (!ini)
 	{
 		WLog_ERR(TAG, "IniFile_New() failed!");
-		return NULL;
+		return nullptr;
 	}
 
 	if (IniFile_ReadBuffer(ini, buffer) < 0)
@@ -734,13 +1000,13 @@ out:
 
 proxyConfig* pf_server_config_load_file(const char* path)
 {
-	proxyConfig* config = NULL;
+	proxyConfig* config = nullptr;
 	wIniFile* ini = IniFile_New();
 
 	if (!ini)
 	{
 		WLog_ERR(TAG, "IniFile_New() failed!");
-		return NULL;
+		return nullptr;
 	}
 
 	if (IniFile_ReadFile(ini, path) < 0)
@@ -769,6 +1035,7 @@ void pf_server_config_print(const proxyConfig* config)
 
 	CONFIG_PRINT_SECTION(section_server);
 	CONFIG_PRINT_STR(config, Host);
+	CONFIG_PRINT_STR(config, SamFile);
 	CONFIG_PRINT_UINT16(config, Port);
 
 	if (config->FixedTarget)
@@ -778,10 +1045,18 @@ void pf_server_config_print(const proxyConfig* config)
 		CONFIG_PRINT_UINT16(config, TargetPort);
 		CONFIG_PRINT_UINT32(config, TargetTlsSecLevel);
 
-		if (config->TargetUser)
-			CONFIG_PRINT_STR(config, TargetUser);
-		if (config->TargetDomain)
-			CONFIG_PRINT_STR(config, TargetDomain);
+		CONFIG_PRINT_STR(config, TargetUser);
+		CONFIG_PRINT_STR(config, TargetDomain);
+		CONFIG_PRINT_SECRET_STR(config, TargetPassword);
+
+		CONFIG_PRINT_BOOL(config, TargetSmartcardAuth);
+		CONFIG_PRINT_SECRET_STR(config, TargetSmartcardCert);
+		CONFIG_PRINT_SECRET_STR(config, TargetSmartcardKey);
+
+		WLog_INFO(TAG, "\t\t%s%s: %s", section_target, key_target_cert_policy,
+		          pf_config_policy_to_str(config->TargetCertPolicy));
+		CONFIG_PRINT_SECRET_STR(config, TargetCertPEM);
+		CONFIG_PRINT_SECRET_STR(config, TargetCertHash);
 	}
 
 	CONFIG_PRINT_SECTION(section_input);
@@ -791,12 +1066,18 @@ void pf_server_config_print(const proxyConfig* config)
 
 	CONFIG_PRINT_SECTION(section_security);
 	CONFIG_PRINT_BOOL(config, ServerNlaSecurity);
+	CONFIG_PRINT_BOOL(config, ServerExtSecurity);
 	CONFIG_PRINT_BOOL(config, ServerTlsSecurity);
 	CONFIG_PRINT_BOOL(config, ServerRdpSecurity);
 	CONFIG_PRINT_BOOL(config, ClientNlaSecurity);
+	CONFIG_PRINT_BOOL(config, ClientExtSecurity);
 	CONFIG_PRINT_BOOL(config, ClientTlsSecurity);
 	CONFIG_PRINT_BOOL(config, ClientRdpSecurity);
 	CONFIG_PRINT_BOOL(config, ClientAllowFallbackToTls);
+
+	CONFIG_PRINT_SECTION(section_codecs);
+	CONFIG_PRINT_BOOL(config, RFX);
+	CONFIG_PRINT_BOOL(config, NSC);
 
 	CONFIG_PRINT_SECTION(section_channels);
 	CONFIG_PRINT_BOOL(config, GFX);
@@ -834,32 +1115,38 @@ void pf_server_config_print(const proxyConfig* config)
 
 	CONFIG_PRINT_SECTION(section_certificates);
 	CONFIG_PRINT_STR(config, CertificateFile);
-	CONFIG_PRINT_STR_CONTENT(config, CertificateContent);
+	CONFIG_PRINT_SECRET_STR(config, CertificateContent);
 	CONFIG_PRINT_STR(config, PrivateKeyFile);
-	CONFIG_PRINT_STR_CONTENT(config, PrivateKeyContent);
+	CONFIG_PRINT_SECRET_STR(config, PrivateKeyContent);
 }
 
 void pf_server_config_free(proxyConfig* config)
 {
-	if (config == NULL)
+	if (config == nullptr)
 		return;
+
+	winpr_zfree(config->Host);
+	winpr_zfree(config->SamFile);
+	winpr_zfree(config->TargetHost);
+	winpr_zfree(config->TargetUser);
+	winpr_zfree(config->TargetDomain);
+	winpr_zfree(config->TargetPassword);
+	winpr_znfree(config->TargetSmartcardCert, config->TargetSmartcardCertLength);
+	winpr_znfree(config->TargetSmartcardKey, config->TargetSmartcardKeyLength);
+	winpr_zfree(config->TargetCertHash);
+	winpr_znfree(config->TargetCertPEM, config->TargetCertPEMLength);
 
 	CommandLineParserFree(config->Passthrough);
 	CommandLineParserFree(config->Intercept);
-	CommandLineParserFree(config->RequiredPlugins);
 	CommandLineParserFree(config->Modules);
-	free(config->TargetHost);
-	free(config->Host);
-	free(config->CertificateFile);
-	free(config->CertificateContent);
-	if (config->CertificatePEM)
-		memset(config->CertificatePEM, 0, config->CertificatePEMLength);
-	free(config->CertificatePEM);
-	free(config->PrivateKeyFile);
-	free(config->PrivateKeyContent);
-	if (config->PrivateKeyPEM)
-		memset(config->PrivateKeyPEM, 0, config->PrivateKeyPEMLength);
-	free(config->PrivateKeyPEM);
+	CommandLineParserFree(config->RequiredPlugins);
+
+	winpr_zfree(config->CertificateFile);
+	winpr_zfree(config->CertificateContent);
+	winpr_znfree(config->CertificatePEM, config->CertificatePEMLength);
+	winpr_zfree(config->PrivateKeyFile);
+	winpr_zfree(config->PrivateKeyContent);
+	winpr_znfree(config->PrivateKeyPEM, config->PrivateKeyPEMLength);
 	IniFile_Free(config->ini);
 	free(config);
 }
@@ -874,7 +1161,7 @@ const char* pf_config_required_plugin(const proxyConfig* config, size_t index)
 {
 	WINPR_ASSERT(config);
 	if (index >= config->RequiredPluginsCount)
-		return NULL;
+		return nullptr;
 
 	return config->RequiredPlugins[index];
 }
@@ -899,17 +1186,10 @@ const char** pf_config_modules(const proxyConfig* config)
 	return cnv.cppc;
 }
 
-static BOOL pf_config_copy_string(char** dst, const char* src)
-{
-	*dst = NULL;
-	if (src)
-		*dst = _strdup(src);
-	return TRUE;
-}
-
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_copy_string_n(char** dst, const char* src, size_t size)
 {
-	*dst = NULL;
+	*dst = nullptr;
 
 	if (src && (size > 0))
 	{
@@ -923,13 +1203,14 @@ static BOOL pf_config_copy_string_n(char** dst, const char* src, size_t size)
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL pf_config_copy_string_list(char*** dst, size_t* size, char** src, size_t srcSize)
 {
 	WINPR_ASSERT(dst);
 	WINPR_ASSERT(size);
 	WINPR_ASSERT(src || (srcSize == 0));
 
-	*dst = NULL;
+	*dst = nullptr;
 	*size = 0;
 	if (srcSize > INT32_MAX)
 		return FALSE;
@@ -938,7 +1219,7 @@ static BOOL pf_config_copy_string_list(char*** dst, size_t* size, char** src, si
 	{
 		char* csv = CommandLineToCommaSeparatedValues((INT32)srcSize, src);
 		*dst = CommandLineParseCommaSeparatedValues(csv, size);
-		free(csv);
+		winpr_zfree(csv);
 	}
 
 	return TRUE;
@@ -958,9 +1239,22 @@ BOOL pf_config_clone(proxyConfig** dst, const proxyConfig* config)
 
 	if (!pf_config_copy_string(&tmp->Host, config->Host))
 		goto fail;
+	if (!pf_config_copy_string(&tmp->SamFile, config->SamFile))
+		goto fail;
 	if (!pf_config_copy_string(&tmp->TargetHost, config->TargetHost))
 		goto fail;
-
+	if (!pf_config_copy_string(&tmp->TargetUser, config->TargetUser))
+		goto fail;
+	if (!pf_config_copy_string(&tmp->TargetDomain, config->TargetDomain))
+		goto fail;
+	if (!pf_config_copy_string(&tmp->TargetPassword, config->TargetPassword))
+		goto fail;
+	if (!pf_config_copy_string_n(&tmp->TargetSmartcardCert, config->TargetSmartcardCert,
+	                             config->TargetSmartcardCertLength))
+		goto fail;
+	if (!pf_config_copy_string_n(&tmp->TargetSmartcardKey, config->TargetSmartcardKey,
+	                             config->TargetSmartcardKeyLength))
+		goto fail;
 	if (!pf_config_copy_string_list(&tmp->Passthrough, &tmp->PassthroughCount, config->Passthrough,
 	                                config->PassthroughCount))
 		goto fail;
@@ -987,7 +1281,10 @@ BOOL pf_config_clone(proxyConfig** dst, const proxyConfig* config)
 	if (!pf_config_copy_string_n(&tmp->PrivateKeyPEM, config->PrivateKeyPEM,
 	                             config->PrivateKeyPEMLength))
 		goto fail;
-
+	if (!pf_config_copy_string(&tmp->TargetCertPEM, config->TargetCertPEM))
+		goto fail;
+	if (!pf_config_copy_string(&tmp->TargetCertHash, config->TargetCertHash))
+		goto fail;
 	tmp->ini = IniFile_Clone(config->ini);
 	if (!tmp->ini)
 		goto fail;
@@ -1013,6 +1310,7 @@ static const char config_plugin_name[] = "config";
 static const char config_plugin_desc[] =
     "A plugin filtering according to proxy configuration file rules";
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_unload(proxyPlugin* plugin)
 {
 	WINPR_ASSERT(plugin);
@@ -1021,18 +1319,19 @@ static BOOL config_plugin_unload(proxyPlugin* plugin)
 	if (plugin)
 	{
 		free(plugin->custom);
-		plugin->custom = NULL;
+		plugin->custom = nullptr;
 	}
 
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_keyboard_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED proxyData* pdata,
                                          void* param)
 {
 	BOOL rc = 0;
-	const struct config_plugin_data* custom = NULL;
-	const proxyConfig* cfg = NULL;
+	const struct config_plugin_data* custom = nullptr;
+	const proxyConfig* cfg = nullptr;
 	const proxyKeyboardEventInfo* event_data = (const proxyKeyboardEventInfo*)(param);
 
 	WINPR_ASSERT(plugin);
@@ -1052,12 +1351,13 @@ static BOOL config_plugin_keyboard_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED 
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_unicode_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED proxyData* pdata,
                                         void* param)
 {
 	BOOL rc = 0;
-	const struct config_plugin_data* custom = NULL;
-	const proxyConfig* cfg = NULL;
+	const struct config_plugin_data* custom = nullptr;
+	const proxyConfig* cfg = nullptr;
 	const proxyUnicodeEventInfo* event_data = (const proxyUnicodeEventInfo*)(param);
 
 	WINPR_ASSERT(plugin);
@@ -1077,12 +1377,13 @@ static BOOL config_plugin_unicode_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED p
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_mouse_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED proxyData* pdata,
                                       void* param)
 {
 	BOOL rc = 0;
-	const struct config_plugin_data* custom = NULL;
-	const proxyConfig* cfg = NULL;
+	const struct config_plugin_data* custom = nullptr;
+	const proxyConfig* cfg = nullptr;
 	const proxyMouseEventInfo* event_data = (const proxyMouseEventInfo*)(param);
 
 	WINPR_ASSERT(plugin);
@@ -1101,12 +1402,13 @@ static BOOL config_plugin_mouse_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED pro
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_mouse_ex_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED proxyData* pdata,
                                          void* param)
 {
 	BOOL rc = 0;
-	const struct config_plugin_data* custom = NULL;
-	const proxyConfig* cfg = NULL;
+	const struct config_plugin_data* custom = nullptr;
+	const proxyConfig* cfg = nullptr;
 	const proxyMouseExEventInfo* event_data = (const proxyMouseExEventInfo*)(param);
 
 	WINPR_ASSERT(plugin);
@@ -1125,6 +1427,7 @@ static BOOL config_plugin_mouse_ex_event(proxyPlugin* plugin, WINPR_ATTR_UNUSED 
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_client_channel_data(WINPR_ATTR_UNUSED proxyPlugin* plugin,
                                               WINPR_ATTR_UNUSED proxyData* pdata, void* param)
 {
@@ -1139,6 +1442,7 @@ static BOOL config_plugin_client_channel_data(WINPR_ATTR_UNUSED proxyPlugin* plu
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_server_channel_data(WINPR_ATTR_UNUSED proxyPlugin* plugin,
                                               WINPR_ATTR_UNUSED proxyData* pdata, void* param)
 {
@@ -1153,6 +1457,7 @@ static BOOL config_plugin_server_channel_data(WINPR_ATTR_UNUSED proxyPlugin* plu
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_dynamic_channel_create(proxyPlugin* plugin,
                                                  WINPR_ATTR_UNUSED proxyData* pdata, void* param)
 {
@@ -1219,6 +1524,7 @@ static BOOL config_plugin_dynamic_channel_create(proxyPlugin* plugin,
 	return accept;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL config_plugin_channel_create(proxyPlugin* plugin, WINPR_ATTR_UNUSED proxyData* pdata,
                                          void* param)
 {
@@ -1272,8 +1578,8 @@ static BOOL config_plugin_channel_create(proxyPlugin* plugin, WINPR_ATTR_UNUSED 
 
 BOOL pf_config_plugin(proxyPluginsManager* plugins_manager, void* userdata)
 {
-	struct config_plugin_data* custom = NULL;
-	proxyPlugin plugin = { 0 };
+	struct config_plugin_data* custom = nullptr;
+	proxyPlugin plugin = WINPR_C_ARRAY_INIT;
 
 	plugin.name = config_plugin_name;
 	plugin.description = config_plugin_desc;
@@ -1310,4 +1616,29 @@ const char* pf_config_get(const proxyConfig* config, const char* section, const 
 	WINPR_ASSERT(key);
 
 	return IniFile_GetKeyValueString(config->ini, section, key);
+}
+
+const char* pf_config_policy_to_str(FreeRDP_ProxyCertPolicy policy)
+{
+	switch (policy)
+	{
+		case FREERDP_PROXY_CERT_POLICY_ALLOW:
+			return "allow";
+		case FREERDP_PROXY_CERT_POLICY_PINNED:
+			return "pinned";
+		case FREERDP_PROXY_CERT_POLICY_DENY:
+		default:
+			return "deny";
+	}
+}
+
+FreeRDP_ProxyCertPolicy pf_config_policy_from_str(const char* val)
+{
+	if (!val)
+		return FREERDP_PROXY_CERT_POLICY_DENY;
+	if (_stricmp(val, "allow") == 0)
+		return FREERDP_PROXY_CERT_POLICY_ALLOW;
+	if (_stricmp(val, "pinned") == 0)
+		return FREERDP_PROXY_CERT_POLICY_PINNED;
+	return FREERDP_PROXY_CERT_POLICY_DENY;
 }

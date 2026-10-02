@@ -19,12 +19,10 @@
  */
 #pragma once
 
-#cmakedefine WITH_WEBVIEW
-
 static const char SDL_CLIENT_NAME[] = "@SDL_CLIENT_BINARY_NAME@";
 static const char SDL_CLIENT_VERSION[] = "@FREERDP_VERSION_FULL@ (@GIT_REVISION@)";
 static const char SDL_CLIENT_VENDOR[] = "@VENDOR@";
 static const char SDL_CLIENT_UUID[] = "@SDL_CLIENT_UUID@";
 static const char SDL_CLIENT_COPYRIGHT[] = "FreeRDP project";
 static const char SDL_CLIENT_URL[] = "@PROJECT_URL@";
-static const char SDL_CLIENT_TYPE[] = "application"; 
+static const char SDL_CLIENT_TYPE[] = "application";

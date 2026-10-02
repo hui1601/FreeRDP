@@ -36,6 +36,7 @@ struct demo_custom_data
 static constexpr char plugin_name[] = "demo";
 static constexpr char plugin_desc[] = "this is a test plugin";
 
+[[nodiscard]]
 static BOOL demo_plugin_unload([[maybe_unused]] proxyPlugin* plugin)
 {
 	WINPR_ASSERT(plugin);
@@ -49,6 +50,7 @@ static BOOL demo_plugin_unload([[maybe_unused]] proxyPlugin* plugin)
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_init_connect([[maybe_unused]] proxyPlugin* plugin,
                                      [[maybe_unused]] proxyData* pdata,
                                      [[maybe_unused]] void* custom)
@@ -61,6 +63,7 @@ static BOOL demo_client_init_connect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_uninit_connect([[maybe_unused]] proxyPlugin* plugin,
                                        [[maybe_unused]] proxyData* pdata,
                                        [[maybe_unused]] void* custom)
@@ -73,6 +76,7 @@ static BOOL demo_client_uninit_connect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_pre_connect([[maybe_unused]] proxyPlugin* plugin,
                                     [[maybe_unused]] proxyData* pdata,
                                     [[maybe_unused]] void* custom)
@@ -85,6 +89,7 @@ static BOOL demo_client_pre_connect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_post_connect([[maybe_unused]] proxyPlugin* plugin,
                                      [[maybe_unused]] proxyData* pdata,
                                      [[maybe_unused]] void* custom)
@@ -97,6 +102,7 @@ static BOOL demo_client_post_connect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_post_disconnect([[maybe_unused]] proxyPlugin* plugin,
                                         [[maybe_unused]] proxyData* pdata,
                                         [[maybe_unused]] void* custom)
@@ -109,6 +115,7 @@ static BOOL demo_client_post_disconnect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_x509_certificate([[maybe_unused]] proxyPlugin* plugin,
                                          [[maybe_unused]] proxyData* pdata,
                                          [[maybe_unused]] void* custom)
@@ -121,6 +128,7 @@ static BOOL demo_client_x509_certificate([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_login_failure([[maybe_unused]] proxyPlugin* plugin,
                                       [[maybe_unused]] proxyData* pdata,
                                       [[maybe_unused]] void* custom)
@@ -133,6 +141,7 @@ static BOOL demo_client_login_failure([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_end_paint([[maybe_unused]] proxyPlugin* plugin,
                                   [[maybe_unused]] proxyData* pdata, [[maybe_unused]] void* custom)
 {
@@ -144,6 +153,7 @@ static BOOL demo_client_end_paint([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_redirect([[maybe_unused]] proxyPlugin* plugin,
                                  [[maybe_unused]] proxyData* pdata, [[maybe_unused]] void* custom)
 {
@@ -155,6 +165,7 @@ static BOOL demo_client_redirect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_post_connect([[maybe_unused]] proxyPlugin* plugin,
                                      [[maybe_unused]] proxyData* pdata,
                                      [[maybe_unused]] void* custom)
@@ -167,6 +178,7 @@ static BOOL demo_server_post_connect([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_peer_activate([[maybe_unused]] proxyPlugin* plugin,
                                       [[maybe_unused]] proxyData* pdata,
                                       [[maybe_unused]] void* custom)
@@ -179,6 +191,7 @@ static BOOL demo_server_peer_activate([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_channels_init([[maybe_unused]] proxyPlugin* plugin,
                                       [[maybe_unused]] proxyData* pdata,
                                       [[maybe_unused]] void* custom)
@@ -191,6 +204,7 @@ static BOOL demo_server_channels_init([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_channels_free([[maybe_unused]] proxyPlugin* plugin,
                                       [[maybe_unused]] proxyData* pdata,
                                       [[maybe_unused]] void* custom)
@@ -203,6 +217,7 @@ static BOOL demo_server_channels_free([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_session_end([[maybe_unused]] proxyPlugin* plugin,
                                     [[maybe_unused]] proxyData* pdata,
                                     [[maybe_unused]] void* custom)
@@ -215,6 +230,7 @@ static BOOL demo_server_session_end([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_filter_keyboard_event([[maybe_unused]] proxyPlugin* plugin,
                                        [[maybe_unused]] proxyData* pdata,
                                        [[maybe_unused]] void* param)
@@ -242,6 +258,7 @@ static BOOL demo_filter_keyboard_event([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_filter_unicode_event([[maybe_unused]] proxyPlugin* plugin,
                                       [[maybe_unused]] proxyData* pdata,
                                       [[maybe_unused]] void* param)
@@ -269,6 +286,7 @@ static BOOL demo_filter_unicode_event([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_mouse_event([[maybe_unused]] proxyPlugin* plugin,
                              [[maybe_unused]] proxyData* pdata, [[maybe_unused]] void* param)
 {
@@ -278,10 +296,11 @@ static BOOL demo_mouse_event([[maybe_unused]] proxyPlugin* plugin,
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(event_data);
 
-	WLog_INFO(TAG, "called %p", event_data);
+	WLog_INFO(TAG, "called %p", WINPR_CXX_COMPAT_CAST(const void*, event_data));
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_mouse_ex_event([[maybe_unused]] proxyPlugin* plugin,
                                 [[maybe_unused]] proxyData* pdata, [[maybe_unused]] void* param)
 {
@@ -291,10 +310,11 @@ static BOOL demo_mouse_ex_event([[maybe_unused]] proxyPlugin* plugin,
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(event_data);
 
-	WLog_INFO(TAG, "called %p", event_data);
+	WLog_INFO(TAG, "called %p", WINPR_CXX_COMPAT_CAST(const void*, event_data));
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_client_channel_data([[maybe_unused]] proxyPlugin* plugin,
                                      [[maybe_unused]] proxyData* pdata,
                                      [[maybe_unused]] void* param)
@@ -310,6 +330,7 @@ static BOOL demo_client_channel_data([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_channel_data([[maybe_unused]] proxyPlugin* plugin,
                                      [[maybe_unused]] proxyData* pdata,
                                      [[maybe_unused]] void* param)
@@ -325,6 +346,7 @@ static BOOL demo_server_channel_data([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_dynamic_channel_create([[maybe_unused]] proxyPlugin* plugin,
                                         [[maybe_unused]] proxyData* pdata,
                                         [[maybe_unused]] void* param)
@@ -339,6 +361,7 @@ static BOOL demo_dynamic_channel_create([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_fetch_target_addr([[maybe_unused]] proxyPlugin* plugin,
                                           [[maybe_unused]] proxyData* pdata,
                                           [[maybe_unused]] void* param)
@@ -349,10 +372,11 @@ static BOOL demo_server_fetch_target_addr([[maybe_unused]] proxyPlugin* plugin,
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(event_data);
 
-	WLog_INFO(TAG, "called %p", event_data);
+	WLog_INFO(TAG, "called %p", WINPR_CXX_COMPAT_CAST(const void*, event_data));
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_server_peer_logon([[maybe_unused]] proxyPlugin* plugin,
                                    [[maybe_unused]] proxyData* pdata, [[maybe_unused]] void* param)
 {
@@ -366,6 +390,7 @@ static BOOL demo_server_peer_logon([[maybe_unused]] proxyPlugin* plugin,
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_dyn_channel_intercept_list([[maybe_unused]] proxyPlugin* plugin,
                                             [[maybe_unused]] proxyData* pdata,
                                             [[maybe_unused]] void* arg)
@@ -376,10 +401,11 @@ static BOOL demo_dyn_channel_intercept_list([[maybe_unused]] proxyPlugin* plugin
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(data);
 
-	WLog_INFO(TAG, "%s: %p", __func__, data);
+	WLog_INFO(TAG, "%s: %p", __func__, WINPR_CXX_COMPAT_CAST(const void*, data));
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_static_channel_intercept_list([[maybe_unused]] proxyPlugin* plugin,
                                                [[maybe_unused]] proxyData* pdata,
                                                [[maybe_unused]] void* arg)
@@ -390,10 +416,11 @@ static BOOL demo_static_channel_intercept_list([[maybe_unused]] proxyPlugin* plu
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(data);
 
-	WLog_INFO(TAG, "%s: %p", __func__, data);
+	WLog_INFO(TAG, "%s: %p", __func__, WINPR_CXX_COMPAT_CAST(const void*, data));
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL demo_dyn_channel_intercept([[maybe_unused]] proxyPlugin* plugin,
                                        [[maybe_unused]] proxyData* pdata,
                                        [[maybe_unused]] void* arg)
@@ -404,10 +431,11 @@ static BOOL demo_dyn_channel_intercept([[maybe_unused]] proxyPlugin* plugin,
 	WINPR_ASSERT(pdata);
 	WINPR_ASSERT(data);
 
-	WLog_INFO(TAG, "%s: %p", __func__, data);
+	WLog_INFO(TAG, "%s: %p", __func__, WINPR_CXX_COMPAT_CAST(const void*, data));
 	return TRUE;
 }
 
+[[nodiscard]]
 static BOOL int_proxy_module_entry_point(proxyPluginsManager* plugins_manager, void* userdata)
 {
 	struct demo_custom_data* custom = nullptr;
@@ -464,6 +492,7 @@ extern "C"
 {
 #endif
 #if defined(BUILD_SHARED_LIBS)
+	[[nodiscard]]
 	FREERDP_API BOOL proxy_module_entry_point(proxyPluginsManager* plugins_manager, void* userdata);
 
 	BOOL proxy_module_entry_point(proxyPluginsManager* plugins_manager, void* userdata)
@@ -471,6 +500,7 @@ extern "C"
 		return int_proxy_module_entry_point(plugins_manager, userdata);
 	}
 #else
+[[nodiscard]]
 FREERDP_API BOOL demo_proxy_module_entry_point(proxyPluginsManager* plugins_manager,
                                                void* userdata);
 BOOL demo_proxy_module_entry_point(proxyPluginsManager* plugins_manager, void* userdata)

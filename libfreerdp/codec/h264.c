@@ -30,13 +30,16 @@
 #include <freerdp/codec/h264.h>
 #include <freerdp/codec/yuv.h>
 #include <freerdp/log.h>
+#include <freerdp/codec/region.h>
 
 #include "h264.h"
 
 #define TAG FREERDP_TAG("codec")
 
+WINPR_ATTR_NODISCARD
 static BOOL avc444_ensure_buffer(H264_CONTEXT* h264, DWORD nDstHeight);
 
+WINPR_ATTR_NODISCARD
 static BOOL yuv_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, UINT32 height)
 {
 	BOOL isNull = FALSE;
@@ -46,13 +49,16 @@ static BOOL yuv_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, U
 		return FALSE;
 
 	if (stride == 0)
+	{
+		const UINT32 pad = width % 16;
 		stride = width;
+		if (pad > 0)
+			width += 16 - pad;
+	}
 
-	if (stride % 16 != 0)
-		stride += 16 - stride % 16;
-
-	if (pheight % 16 != 0)
-		pheight += 16 - pheight % 16;
+	/* Add padding lines. Allows relaxing bounds checks in decoder functions */
+	stride += 32 - stride % 16;
+	pheight += 32 - pheight % 16;
 
 	const size_t nPlanes = h264->hwAccel ? 2 : 3;
 
@@ -83,9 +89,6 @@ static BOOL yuv_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, U
 			h264->iStride[2] = (stride + 1) / 2;
 		}
 
-		h264->width = width;
-		h264->height = height;
-
 		for (size_t x = 0; x < nPlanes; x++)
 		{
 			BYTE* tmp1 = winpr_aligned_recalloc(h264->pYUVData[x], h264->iStride[x], pheight, 16);
@@ -98,6 +101,8 @@ static BOOL yuv_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, U
 			if (!tmp1 || !tmp2)
 				return FALSE;
 		}
+		h264->width = width;
+		h264->height = height;
 	}
 
 	return TRUE;
@@ -106,6 +111,66 @@ static BOOL yuv_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, U
 BOOL avc420_ensure_buffer(H264_CONTEXT* h264, UINT32 stride, UINT32 width, UINT32 height)
 {
 	return yuv_ensure_buffer(h264, stride, width, height);
+}
+
+WINPR_ATTR_NODISCARD
+static BOOL isRectValid(wLog* log, size_t pos, UINT32 width, UINT32 height,
+                        const RECTANGLE_16* rect)
+{
+	WINPR_ASSERT(rect);
+	if ((rect->left > width) || (rect->right > width) || (rect->left >= rect->right) ||
+	    (rect->top > height) || (rect->bottom > height) || (rect->top >= rect->bottom))
+	{
+		char buffer[64] = WINPR_C_ARRAY_INIT;
+		WLog_Print(log, WLOG_WARN,
+		           "Rectangle %" PRIuz " %s outside of bounding frame %" PRIu32 "x%" PRIu32, pos,
+		           rectangle_to_string(rect, buffer, sizeof(buffer)), width, height);
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+WINPR_ATTR_NODISCARD
+static BOOL areRectsValid(wLog* log, UINT32 width, UINT32 height, const RECTANGLE_16* rects,
+                          UINT32 count)
+{
+	WINPR_ASSERT(rects || (count == 0));
+	for (size_t x = 0; x < count; x++)
+	{
+		const RECTANGLE_16* rect = &rects[x];
+		if (!isRectValid(log, x, width, height, rect))
+			return FALSE;
+	}
+	return TRUE;
+}
+
+WINPR_ATTR_NODISCARD
+static int log_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize,
+                          const RECTANGLE_16* rects, UINT32 nrRects)
+{
+	WINPR_ASSERT(h264);
+	WINPR_ASSERT(h264->subsystem);
+	WINPR_ASSERT(h264->subsystem->Decompress);
+
+	const int status = h264->subsystem->Decompress(h264, pSrcData, SrcSize);
+	if (status < 0)
+	{
+		WLog_Print(h264->log, WLOG_WARN, "H264 decompress failed with %d", status);
+		return status;
+	}
+
+	/* no picture decoded, nothing to validate */
+	if (status == 0)
+		return 0;
+
+	/* some server implementations (krdc) use H264 frames smaller than the surface sizes,
+	 * validate the regions against this size as well */
+	if (!areRectsValid(h264->log, h264->YUVWidth, h264->YUVHeight, rects, nrRects))
+		return -1015;
+	if (!areRectsValid(h264->log, h264->width, h264->height, rects, nrRects))
+		return -1016;
+	return status;
 }
 
 INT32 avc420_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize, BYTE* pDstData,
@@ -119,7 +184,10 @@ INT32 avc420_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize
 	if (!h264 || h264->Compressor)
 		return -1001;
 
-	status = h264->subsystem->Decompress(h264, pSrcData, SrcSize);
+	if (!areRectsValid(h264->log, nDstWidth, nDstHeight, regionRects, numRegionRects))
+		return -1013;
+
+	status = log_decompress(h264, pSrcData, SrcSize, regionRects, numRegionRects);
 
 	if (status == 0)
 		return 1;
@@ -130,13 +198,14 @@ INT32 avc420_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize
 	pYUVData[0] = h264->pYUVData[0];
 	pYUVData[1] = h264->pYUVData[1];
 	pYUVData[2] = h264->pYUVData[2];
-	if (!yuv420_context_decode(h264->yuv, pYUVData, h264->iStride, h264->height, DstFormat,
+	if (!yuv420_context_decode(h264->yuv, pYUVData, h264->iStride, h264->YUVHeight, DstFormat,
 	                           pDstData, nDstStep, regionRects, numRegionRects))
 		return -1002;
 
 	return 1;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL allocate_h264_metablock(UINT32 QP, RECTANGLE_16* rectangles,
                                     RDPGFX_H264_METABLOCK* meta, size_t count)
 {
@@ -171,6 +240,7 @@ static BOOL allocate_h264_metablock(UINT32 QP, RECTANGLE_16* rectangles,
 	return TRUE;
 }
 
+WINPR_ATTR_NODISCARD
 static inline BOOL diff_tile(const RECTANGLE_16* regionRect, BYTE* pYUVData[3],
                              BYTE* pOldYUVData[3], UINT32 const iStride[3])
 {
@@ -205,6 +275,7 @@ static inline BOOL diff_tile(const RECTANGLE_16* regionRect, BYTE* pYUVData[3],
 	return FALSE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL detect_changes(BOOL firstFrameDone, const UINT32 QP, const RECTANGLE_16* regionRect,
                            BYTE* pYUVData[3], BYTE* pOldYUVData[3], UINT32 const iStride[3],
                            RDPGFX_H264_METABLOCK* meta)
@@ -212,7 +283,7 @@ static BOOL detect_changes(BOOL firstFrameDone, const UINT32 QP, const RECTANGLE
 	size_t count = 0;
 	size_t wc = 0;
 	size_t hc = 0;
-	RECTANGLE_16* rectangles = NULL;
+	RECTANGLE_16* rectangles = nullptr;
 
 	if (!regionRect || !pYUVData || !pOldYUVData || !iStride || !meta)
 		return FALSE;
@@ -229,9 +300,9 @@ static BOOL detect_changes(BOOL firstFrameDone, const UINT32 QP, const RECTANGLE
 	}
 	else
 	{
-		for (size_t y = regionRect->top; y < regionRect->bottom; y += 64)
+		for (size_t y = 0; y < regionRect->bottom - regionRect->top; y += 64)
 		{
-			for (size_t x = regionRect->left; x < regionRect->right; x += 64)
+			for (size_t x = 0; x < regionRect->right - regionRect->left; x += 64)
 			{
 				RECTANGLE_16 rect;
 				rect.left = (UINT16)MIN(UINT16_MAX, regionRect->left + x);
@@ -283,9 +354,9 @@ INT32 avc420_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
                       BYTE** ppDstData, UINT32* pDstSize, RDPGFX_H264_METABLOCK* meta)
 {
 	INT32 rc = -1;
-	BYTE* pYUVData[3] = { 0 };
-	const BYTE* pcYUVData[3] = { 0 };
-	BYTE* pOldYUVData[3] = { 0 };
+	BYTE* pYUVData[3] = WINPR_C_ARRAY_INIT;
+	const BYTE* pcYUVData[3] = WINPR_C_ARRAY_INIT;
+	BYTE* pOldYUVData[3] = WINPR_C_ARRAY_INIT;
 
 	if (!h264 || !regionRect || !meta || !h264->Compressor)
 		return -1;
@@ -348,12 +419,12 @@ INT32 avc444_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
                       RDPGFX_H264_METABLOCK* auxMeta)
 {
 	int rc = -1;
-	BYTE* coded = NULL;
+	BYTE* coded = nullptr;
 	UINT32 codedSize = 0;
-	BYTE** pYUV444Data = NULL;
-	BYTE** pOldYUV444Data = NULL;
-	BYTE** pYUVData = NULL;
-	BYTE** pOldYUVData = NULL;
+	BYTE** pYUV444Data = nullptr;
+	BYTE** pOldYUV444Data = nullptr;
+	BYTE** pYUVData = nullptr;
+	BYTE** pOldYUVData = nullptr;
 
 	if (!h264 || !h264->Compressor)
 		return -1;
@@ -408,7 +479,7 @@ INT32 avc444_compress(H264_CONTEXT* h264, const BYTE* pSrcData, DWORD SrcFormat,
 		*op = 2;
 	else
 	{
-		WLog_INFO(TAG, "no changes detected for luma or chroma frame");
+		WLog_Print(h264->log, WLOG_TRACE, "no changes detected for luma or chroma frame");
 		rc = 0;
 		goto fail;
 	}
@@ -446,7 +517,7 @@ fail:
 	return rc;
 }
 
-static BOOL avc444_ensure_buffer(H264_CONTEXT* h264, DWORD nDstHeight)
+BOOL avc444_ensure_buffer(H264_CONTEXT* h264, DWORD nDstHeight)
 {
 	WINPR_ASSERT(h264);
 
@@ -463,14 +534,27 @@ static BOOL avc444_ensure_buffer(H264_CONTEXT* h264, DWORD nDstHeight)
 	if (pad != 0)
 		padDstHeight += 16 - pad;
 
-	if ((piMainStride[0] != piDstStride[0]) ||
-	    (piDstSize[0] != 1ull * piMainStride[0] * padDstHeight))
+	/* Add padding lines. Allows relaxing bounds checks in decoder functions */
+	padDstHeight += 16;
+
+	if ((piMainStride[0] == 0) || (padDstHeight == 0))
+		return FALSE;
+
+	const uint64_t dstsize = 1ull * piMainStride[0] * padDstHeight;
+	if (dstsize > UINT32_MAX)
+		return FALSE;
+
+	if ((piMainStride[0] != piDstStride[0]) || (piDstSize[0] != dstsize))
 	{
 		for (UINT32 x = 0; x < 3; x++)
 		{
 			piDstStride[x] = piMainStride[0];
-			piDstSize[x] = piDstStride[x] * padDstHeight;
 
+			const uint64_t dstride = 1ull * piDstStride[x] * padDstHeight;
+			if (dstride > UINT32_MAX)
+				return FALSE;
+
+			piDstSize[x] = WINPR_ASSERTING_INT_CAST(UINT32, dstride);
 			if (piDstSize[x] == 0)
 				return FALSE;
 
@@ -510,19 +594,23 @@ fail:
 	return FALSE;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL avc444_process_rects(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize,
                                  BYTE* pDstData, UINT32 DstFormat, UINT32 nDstStep,
                                  WINPR_ATTR_UNUSED UINT32 nDstWidth, UINT32 nDstHeight,
                                  const RECTANGLE_16* rects, UINT32 nrRects, avc444_frame_type type)
 {
-	const BYTE* pYUVData[3];
-	BYTE* pYUVDstData[3];
+	const BYTE* pYUVData[3] = WINPR_C_ARRAY_INIT;
+	BYTE* pYUVDstData[3] = WINPR_C_ARRAY_INIT;
 	UINT32* piDstStride = h264->iYUV444Stride;
 	BYTE** ppYUVDstData = h264->pYUV444Data;
 	const UINT32* piStride = h264->iStride;
 
-	if (h264->subsystem->Decompress(h264, pSrcData, SrcSize) < 0)
+	const int status = log_decompress(h264, pSrcData, SrcSize, rects, nrRects);
+	if (status < 0)
 		return FALSE;
+	if (status == 0)
+		return TRUE;
 
 	pYUVData[0] = h264->pYUVData[0];
 	pYUVData[1] = h264->pYUVData[1];
@@ -533,11 +621,9 @@ static BOOL avc444_process_rects(H264_CONTEXT* h264, const BYTE* pSrcData, UINT3
 	pYUVDstData[0] = ppYUVDstData[0];
 	pYUVDstData[1] = ppYUVDstData[1];
 	pYUVDstData[2] = ppYUVDstData[2];
-	if (!yuv444_context_decode(h264->yuv, (BYTE)type, pYUVData, piStride, h264->height, pYUVDstData,
-	                           piDstStride, DstFormat, pDstData, nDstStep, rects, nrRects))
-		return FALSE;
-
-	return TRUE;
+	return (yuv444_context_decode(h264->yuv, (BYTE)type, pYUVData, piStride, h264->YUVHeight,
+	                              pYUVDstData, piDstStride, DstFormat, pDstData, nDstStep, rects,
+	                              nrRects));
 }
 
 #if defined(AVC444_FRAME_STAT)
@@ -568,6 +654,11 @@ INT32 avc444_decompress(H264_CONTEXT* h264, BYTE op, const RECTANGLE_16* regionR
 
 	if (!h264 || !regionRects || !pSrcData || !pDstData || h264->Compressor)
 		return -1001;
+
+	if (!areRectsValid(h264->log, nDstWidth, nDstHeight, regionRects, numRegionRects))
+		return -1013;
+	if (!areRectsValid(h264->log, nDstWidth, nDstHeight, auxRegionRects, numAuxRegionRect))
+		return -1014;
 
 	switch (op)
 	{
@@ -639,8 +730,9 @@ INT32 avc444_decompress(H264_CONTEXT* h264, BYTE op, const RECTANGLE_16* regionR
 
 #define MAX_SUBSYSTEMS 10
 static INIT_ONCE subsystems_once = INIT_ONCE_STATIC_INIT;
-static const H264_CONTEXT_SUBSYSTEM* subSystems[MAX_SUBSYSTEMS] = { 0 };
+static const H264_CONTEXT_SUBSYSTEM* subSystems[MAX_SUBSYSTEMS] = WINPR_C_ARRAY_INIT;
 
+WINPR_ATTR_NODISCARD
 static BOOL CALLBACK h264_register_subsystems(WINPR_ATTR_UNUSED PINIT_ONCE once,
                                               WINPR_ATTR_UNUSED PVOID param,
                                               WINPR_ATTR_UNUSED PVOID* context)
@@ -674,13 +766,15 @@ static BOOL CALLBACK h264_register_subsystems(WINPR_ATTR_UNUSED PINIT_ONCE once,
 	return i > 0;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL h264_context_init(H264_CONTEXT* h264)
 {
 	if (!h264)
 		return FALSE;
 
-	h264->subsystem = NULL;
-	InitOnceExecuteOnce(&subsystems_once, h264_register_subsystems, NULL, NULL);
+	h264->subsystem = nullptr;
+	if (!InitOnceExecuteOnce(&subsystems_once, h264_register_subsystems, nullptr, nullptr))
+		return FALSE;
 
 	for (size_t i = 0; i < MAX_SUBSYSTEMS; i++)
 	{
@@ -719,7 +813,7 @@ H264_CONTEXT* h264_context_new(BOOL Compressor)
 {
 	H264_CONTEXT* h264 = (H264_CONTEXT*)calloc(1, sizeof(H264_CONTEXT));
 	if (!h264)
-		return NULL;
+		return nullptr;
 
 	h264->log = WLog_Get(TAG);
 
@@ -748,7 +842,7 @@ fail:
 	WINPR_PRAGMA_DIAG_IGNORED_MISMATCHED_DEALLOC
 	h264_context_free(h264);
 	WINPR_PRAGMA_DIAG_POP
-	return NULL;
+	return nullptr;
 }
 
 void h264_context_free(H264_CONTEXT* h264)
@@ -780,7 +874,7 @@ void h264_context_free(H264_CONTEXT* h264)
 
 void free_h264_metablock(RDPGFX_H264_METABLOCK* meta)
 {
-	RDPGFX_H264_METABLOCK m = { 0 };
+	RDPGFX_H264_METABLOCK m = WINPR_C_ARRAY_INIT;
 	if (!meta)
 		return;
 	free(meta->quantQualityVals);
@@ -800,8 +894,23 @@ BOOL h264_context_set_option(H264_CONTEXT* h264, H264_CONTEXT_OPTION option, UIN
 			h264->FrameRate = value;
 			return TRUE;
 		case H264_CONTEXT_OPTION_RATECONTROL:
-			h264->RateControlMode = value;
+		{
+			switch (value)
+			{
+				case H264_RATECONTROL_VBR:
+					h264->RateControlMode = H264_RATECONTROL_VBR;
+					return TRUE;
+				case H264_RATECONTROL_CQP:
+					h264->RateControlMode = H264_RATECONTROL_CQP;
+					return TRUE;
+				default:
+					WLog_Print(h264->log, WLOG_WARN,
+					           "Unknown H264_CONTEXT_OPTION_RATECONTROL value [0x%08" PRIx32 "]",
+					           value);
+					return FALSE;
+			}
 			return TRUE;
+		}
 		case H264_CONTEXT_OPTION_QP:
 			h264->QP = value;
 			return TRUE;
@@ -809,8 +918,9 @@ BOOL h264_context_set_option(H264_CONTEXT* h264, H264_CONTEXT_OPTION option, UIN
 			h264->UsageType = value;
 			return TRUE;
 		case H264_CONTEXT_OPTION_HW_ACCEL:
-			h264->hwAccel = value ? TRUE : FALSE;
-			return TRUE;
+			h264->hwAccel = (value);
+			IFCALL(h264->subsystem->Uninit, h264);
+			return IFCALLRESULT(TRUE, h264->subsystem->Init, h264);
 		default:
 			WLog_Print(h264->log, WLOG_WARN, "Unknown H264_CONTEXT_OPTION[0x%08" PRIx32 "]",
 			           option);

@@ -36,7 +36,8 @@ extern "C"
 {
 #endif
 
-	/** @enum Expected wellknown fields to be supported
+	/** @enum AAD_WELLKNOWN_VALUES
+	 * @brief Expected wellknown fields to be supported
 	 *  @since version 3.10.0
 	 */
 	typedef enum
@@ -73,7 +74,7 @@ extern "C"
 	 *
 	 *  @since version 3.0.0
 	 *
-	 * @return The token string or \b NULL
+	 * @return The token string or \b nullptr
 	 */
 	WINPR_ATTR_MALLOC(free, 1)
 	FREERDP_API char* freerdp_utils_aad_get_access_token(wLog* log, const char* data,
@@ -86,16 +87,18 @@ extern "C"
 	 *  @return The string representation of the enum value
 	 *  @since version 3.10.0
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API const char* freerdp_utils_aad_wellknwon_value_name(AAD_WELLKNOWN_VALUES which);
 
 	/** Helper to extract a string from AAD::wellknown JSON
 	 *
 	 * @param context The rdpContext to query for
 	 * @param which The enum value of the field to query
-	 *  @return A constant string to be used for queries or \b NULL in case it does not exist.
+	 *  @return A constant string to be used for queries or \b nullptr in case it does not exist.
 	 *
 	 *  @since version 3.10.0
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API const char* freerdp_utils_aad_get_wellknown_string(rdpContext* context,
 	                                                               AAD_WELLKNOWN_VALUES which);
 
@@ -103,10 +106,11 @@ extern "C"
 	 *
 	 * @param context The rdpContext to query for
 	 * @param which The raw string name of the field to query
-	 *  @return A constant string to be used for queries or \b NULL in case it does not exist.
+	 *  @return A constant string to be used for queries or \b nullptr in case it does not exist.
 	 *
 	 *  @since version 3.10.0
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API const char* freerdp_utils_aad_get_wellknown_custom_string(rdpContext* context,
 	                                                                      const char* which);
 
@@ -114,10 +118,12 @@ extern "C"
 	 *
 	 * @param context The rdpContext to query for
 	 * @param which The enum value of the field to query
-	 *  @return A \b WINPR_JSON object to be used for queries or \b NULL in case it does not exist.
+	 *  @return A \b WINPR_JSON object to be used for queries or \b nullptr in case it does not
+	 * exist.
 	 *
 	 *  @since version 3.10.0
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API WINPR_JSON* freerdp_utils_aad_get_wellknown_object(rdpContext* context,
 	                                                               AAD_WELLKNOWN_VALUES which);
 
@@ -125,10 +131,12 @@ extern "C"
 	 *
 	 * @param context The rdpContext to query for
 	 * @param which The raw string name of the field to query
-	 *  @return A \b WINPR_JSON object to be used for queries or \b NULL in case it does not exist.
+	 *  @return A \b WINPR_JSON object to be used for queries or \b nullptr in case it does not
+	 * exist.
 	 *
 	 *  @since version 3.10.0
 	 */
+	WINPR_ATTR_NODISCARD
 	FREERDP_API WINPR_JSON* freerdp_utils_aad_get_wellknown_custom_object(rdpContext* context,
 	                                                                      const char* which);
 
@@ -137,11 +145,13 @@ extern "C"
 	 * @param  log A logger instance to use
 	 * @param base the base URL to connect to
 	 * @param tenantid the tenant to use for the connection, use \b common for default
-	 *  @return A \b WINPR_JSON object to be used for queries or \b NULL in case it does not exist.
+	 *  @return A \b WINPR_JSON object to be used for queries or \b nullptr in case it does not
+	 * exist.
 	 *
 	 *  @since version 3.10.0
 	 */
 	WINPR_ATTR_MALLOC(WINPR_JSON_Delete, 1)
+	WINPR_ATTR_NODISCARD
 	FREERDP_API WINPR_JSON* freerdp_utils_aad_get_wellknown(wLog* log, const char* base,
 	                                                        const char* tenantid);
 

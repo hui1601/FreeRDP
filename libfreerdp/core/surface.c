@@ -111,14 +111,16 @@ static BOOL update_recv_surfcmd_is_rect_valid(const rdpContext* context,
 	}
 
 	/* The rectangle needs to fit into our session size */
-	if ((cmd->destRight > context->settings->DesktopWidth) ||
-	    (cmd->destBottom > context->settings->DesktopHeight))
+	const DWORD DesktopWidth = freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopWidth);
+	const DWORD DesktopHeight =
+	    freerdp_settings_get_uint32(context->settings, FreeRDP_DesktopHeight);
+	if ((cmd->destRight > DesktopWidth) || (cmd->destBottom > DesktopHeight))
 	{
 		WLog_WARN(TAG,
 		          "Invalid surface bits command rectangle: %" PRIu16 "x%" PRIu16 "-%" PRIu16
 		          "x%" PRIu16 " does not fit %" PRIu32 "x%" PRIu32,
-		          cmd->destLeft, cmd->destTop, cmd->destRight, cmd->destBottom,
-		          context->settings->DesktopWidth, context->settings->DesktopHeight);
+		          cmd->destLeft, cmd->destTop, cmd->destRight, cmd->destBottom, DesktopWidth,
+		          DesktopHeight);
 		return FALSE;
 	}
 
@@ -127,8 +129,11 @@ static BOOL update_recv_surfcmd_is_rect_valid(const rdpContext* context,
 
 static BOOL update_recv_surfcmd_surface_bits(rdpUpdate* update, wStream* s, UINT16 cmdType)
 {
+	rdp_update_internal* up = update_cast(update);
 	BOOL rc = FALSE;
-	SURFACE_BITS_COMMAND cmd = { 0 };
+	SURFACE_BITS_COMMAND cmd = WINPR_C_ARRAY_INIT;
+
+	WINPR_ASSERT(up);
 
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 8))
 		goto fail;
@@ -145,6 +150,26 @@ static BOOL update_recv_surfcmd_surface_bits(rdpUpdate* update, wStream* s, UINT
 	if (!update_recv_surfcmd_bitmap_ex(s, &cmd.bmp))
 		goto fail;
 
+	up->stats.base[RDP_STATS_SURFACE_BITS]++;
+	switch (cmd.bmp.codecID)
+	{
+		case RDP_CODEC_ID_REMOTEFX:
+			up->stats.base[RDP_STATS_SURFACE_BITS_RFX]++;
+			break;
+		case RDP_CODEC_ID_IMAGE_REMOTEFX:
+			up->stats.base[RDP_STATS_SURFACE_BITS_RFX_IMAGE]++;
+			break;
+		case RDP_CODEC_ID_NSCODEC:
+			up->stats.base[RDP_STATS_SURFACE_BITS_NSC]++;
+			break;
+		case RDP_CODEC_ID_NONE:
+			up->stats.base[RDP_STATS_SURFACE_BITS_NONE]++;
+			break;
+		default:
+			up->stats.base[RDP_STATS_SURFACE_BITS_UNKNOWN]++;
+			break;
+	}
+
 	if (!IFCALLRESULT(TRUE, update->SurfaceBits, update->context, &cmd))
 	{
 		WLog_DBG(TAG, "update->SurfaceBits implementation failed");
@@ -158,7 +183,7 @@ fail:
 
 static BOOL update_recv_surfcmd_frame_marker(rdpUpdate* update, wStream* s)
 {
-	SURFACE_FRAME_MARKER marker = { 0 };
+	SURFACE_FRAME_MARKER marker = WINPR_C_ARRAY_INIT;
 	rdp_update_internal* up = update_cast(update);
 
 	WINPR_ASSERT(s);
@@ -169,10 +194,10 @@ static BOOL update_recv_surfcmd_frame_marker(rdpUpdate* update, wStream* s)
 	Stream_Read_UINT16(s, marker.frameAction);
 	if (!Stream_CheckAndLogRequiredLength(TAG, s, 4))
 		WLog_WARN(TAG,
-		          "[SERVER-BUG]: got %" PRIuz ", expected %" PRIuz
+		          "[SERVER-BUG]: got %" PRIuz ", expected %u"
 		          " bytes. [MS-RDPBCGR] 2.2.9.2.3 Frame Marker Command (TS_FRAME_MARKER) is "
 		          "missing frameId, ignoring",
-		          Stream_GetRemainingLength(s), 4);
+		          Stream_GetRemainingLength(s), 4u);
 	else
 		Stream_Read_UINT32(s, marker.frameId);
 	WLog_Print(up->log, WLOG_DEBUG, "SurfaceFrameMarker: action: %s (%" PRIu32 ") id: %" PRIu32 "",
@@ -196,7 +221,7 @@ static BOOL update_recv_surfcmd_frame_marker(rdpUpdate* update, wStream* s)
 	return TRUE;
 }
 
-int update_recv_surfcmds(rdpUpdate* update, wStream* s)
+BOOL update_recv_surfcmds(rdpUpdate* update, wStream* s)
 {
 	UINT16 cmdType = 0;
 	rdp_update_internal* up = update_cast(update);
@@ -215,31 +240,32 @@ int update_recv_surfcmds(rdpUpdate* update, wStream* s)
 			case CMDTYPE_SET_SURFACE_BITS:
 			case CMDTYPE_STREAM_SURFACE_BITS:
 				if (!update_recv_surfcmd_surface_bits(update, s, cmdType))
-					return -1;
-
+					return FALSE;
 				break;
 
 			case CMDTYPE_FRAME_MARKER:
+				up->stats.base[RDP_STATS_SURFACE_FRAME_MARKER]++;
 				if (!update_recv_surfcmd_frame_marker(update, s))
-					return -1;
+					return FALSE;
 
 				break;
 
 			default:
 				WLog_ERR(TAG, "unknown cmdType 0x%04" PRIX16 "", cmdType);
-				return -1;
+				return FALSE;
 		}
 
 		if (up->dump_rfx)
 		{
 			const size_t size = Stream_GetPosition(s) - start;
 			/* TODO: treat return values */
-			pcap_add_record(up->pcap_rfx, mark, size);
+			if (!pcap_add_record(up->pcap_rfx, mark, size))
+				return FALSE;
 			pcap_flush(up->pcap_rfx);
 		}
 	}
 
-	return 0;
+	return TRUE;
 }
 
 static BOOL update_write_surfcmd_bitmap_header_ex(wStream* s,
@@ -305,12 +331,15 @@ BOOL update_write_surfcmd_surface_bits(wStream* s, const SURFACE_BITS_COMMAND* c
 		case CMDTYPE_STREAM_SURFACE_BITS:
 			break;
 		default:
+		{
+			const UINT16 defaultCmdType = CMDTYPE_STREAM_SURFACE_BITS;
 			WLog_WARN(TAG,
 			          "SURFACE_BITS_COMMAND->cmdType 0x%04" PRIx16
 			          " not allowed, correcting to 0x%04" PRIx16,
-			          cmdType, CMDTYPE_STREAM_SURFACE_BITS);
-			cmdType = CMDTYPE_STREAM_SURFACE_BITS;
-			break;
+			          cmdType, defaultCmdType);
+			cmdType = defaultCmdType;
+		}
+		break;
 	}
 
 	Stream_Write_UINT16(s, WINPR_ASSERTING_INT_CAST(uint16_t, cmdType));

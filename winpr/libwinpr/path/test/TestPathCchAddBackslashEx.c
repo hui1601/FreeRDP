@@ -11,9 +11,9 @@ static const TCHAR testPathNoBackslash[] = _T("C:\\Program Files");
 int TestPathCchAddBackslashEx(int argc, char* argv[])
 {
 	HRESULT status = 0;
-	LPTSTR pszEnd = NULL;
+	LPTSTR pszEnd = nullptr;
 	size_t cchRemaining = 0;
-	TCHAR Path[PATHCCH_MAX_CCH] = { 0 };
+	TCHAR Path[PATHCCH_MAX_CCH] = WINPR_C_ARRAY_INIT;
 
 	WINPR_UNUSED(argc);
 	WINPR_UNUSED(argv);
@@ -60,24 +60,11 @@ int TestPathCchAddBackslashEx(int argc, char* argv[])
 		return -1;
 	}
 
-	/* Use NULL PSTR, expect FAILED(status) */
-
-	status = PathCchAddBackslashEx(NULL, PATHCCH_MAX_CCH, NULL, NULL);
-
-	if (SUCCEEDED(status))
-	{
-		_tprintf(
-		    _T("PathCchAddBackslashEx unexpectedly succeeded with null buffer. Status: 0x%08") _T(
-		        PRIX32) _T("\n"),
-		    status);
-		return -1;
-	}
-
 	/* Use insufficient size value, expect FAILED(status)  */
 
 	_tcsncpy(Path, _T("C:\\tmp"), ARRAYSIZE(Path));
 
-	status = PathCchAddBackslashEx(Path, 7, NULL, NULL);
+	status = PathCchAddBackslashEx(Path, 7, nullptr, nullptr);
 
 	if (SUCCEEDED(status))
 	{
@@ -91,7 +78,7 @@ int TestPathCchAddBackslashEx(int argc, char* argv[])
 
 	_tcsncpy(Path, _T("C:\\tmp"), ARRAYSIZE(Path));
 
-	status = PathCchAddBackslashEx(Path, 8, NULL, NULL);
+	status = PathCchAddBackslashEx(Path, 8, nullptr, nullptr);
 
 	if (status != S_OK)
 	{

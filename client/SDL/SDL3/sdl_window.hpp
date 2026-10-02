@@ -20,6 +20,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
 #include <SDL3/SDL.h>
 
 #include <freerdp/settings_types.h>
@@ -27,19 +29,29 @@
 class SdlWindow
 {
   public:
-	SdlWindow(const std::string& title, Sint32 startupX, Sint32 startupY, Sint32 width,
-	          Sint32 height, Uint32 flags);
+	[[nodiscard]] static SdlWindow create(SDL_DisplayID id, const std::string& title, Uint32 flags,
+	                                      Uint32 width = 0, Uint32 height = 0);
+	/* Create at an explicit position+size (RAIL windows: server-driven geometry). */
+	[[nodiscard]] static SdlWindow create(SDL_DisplayID id, const std::string& title, Uint32 flags,
+	                                      const SDL_Rect& rect);
+	/* Popup: no taskbar entry, no keyboard focus, Wayland-positionable (xdg_popup). */
+	[[nodiscard]] static SdlWindow createPopup(SDL_Window* parent, const SDL_Rect& rect,
+	                                           bool transparent, bool tooltip = false);
+	[[nodiscard]] static rdpMonitor query(SDL_DisplayID id, bool forceAsPrimary = false);
+
 	SdlWindow(SdlWindow&& other) noexcept;
 	SdlWindow(const SdlWindow& other) = delete;
-	~SdlWindow();
+	virtual ~SdlWindow();
 
 	SdlWindow& operator=(const SdlWindow& other) = delete;
 	SdlWindow& operator=(SdlWindow&& other) = delete;
 
-	[[nodiscard]] Uint32 id() const;
+	[[nodiscard]] SDL_WindowID id() const;
 	[[nodiscard]] SDL_DisplayID displayIndex() const;
 	[[nodiscard]] SDL_Rect rect() const;
+	[[nodiscard]] SDL_Rect bounds() const;
 	[[nodiscard]] SDL_Window* window() const;
+	[[nodiscard]] SDL_Renderer* renderer() const;
 
 	[[nodiscard]] Sint32 offsetX() const;
 	void setOffsetX(Sint32 x);
@@ -47,24 +59,78 @@ class SdlWindow
 	void setOffsetY(Sint32 y);
 	[[nodiscard]] Sint32 offsetY() const;
 
-	[[nodiscard]] rdpMonitor monitor() const;
+	[[nodiscard]] rdpMonitor monitor(bool isPrimary) const;
+	void setMonitor(rdpMonitor monitor);
 
-	bool grabKeyboard(bool enable);
-	bool grabMouse(bool enable);
+	[[nodiscard]] float scale() const;
+	[[nodiscard]] SDL_DisplayOrientation orientation() const;
+
+	[[nodiscard]] bool grabKeyboard(bool enable);
+	[[nodiscard]] bool grabMouse(bool enable);
 	void setBordered(bool bordered);
 	void raise();
 	void resizeable(bool use);
-	void fullscreen(bool enter);
+	void fullscreen(bool enter, bool forceOriginalDisplay);
 	void minimize();
 
-	bool fill(Uint8 r = 0x00, Uint8 g = 0x00, Uint8 b = 0x00, Uint8 a = 0xff);
-	bool blit(SDL_Surface* surface, const SDL_Rect& src, SDL_Rect& dst);
+	[[nodiscard]] bool resizeToScale();
+	[[nodiscard]] bool resize(const SDL_Point& size);
+
+	[[nodiscard]] bool drawRect(SDL_Surface* surface, SDL_Point offset, const SDL_Rect& srcRect);
+	[[nodiscard]] bool drawRects(SDL_Surface* surface, SDL_Point offset,
+	                             const std::vector<SDL_Rect>& rects = {});
+	[[nodiscard]] bool drawScaledRect(SDL_Surface* surface, const SDL_FPoint& scale,
+	                                  const SDL_Rect& srcRect);
+
+	[[nodiscard]] bool drawScaledRects(SDL_Surface* surface, const SDL_FPoint& scale,
+	                                   const std::vector<SDL_Rect>& rects = {});
+
+	[[nodiscard]] bool fill(Uint8 r = 0x00, Uint8 g = 0x00, Uint8 b = 0x00, Uint8 a = 0xff);
+
+	[[nodiscard]] bool blit(SDL_Surface* surface, const SDL_Rect& src, SDL_Rect& dst);
+	/* Render interactive resize feedback overlay. */
+	bool paintResizeFrame(SDL_Surface* surface, SDL_Point off, bool contentChanged,
+	                      const SDL_Rect& inset = { 0, 0, 0, 0 }, bool fillRevealed = true,
+	                      bool dashedBorder = true);
 	void updateSurface();
 
+  protected:
+	SdlWindow(SDL_DisplayID id, const std::string& title, const SDL_Rect& rect, Uint32 flags);
+	SdlWindow(SDL_Window* parent, const SDL_Rect& rect, bool transparent, bool tooltip);
+
+	[[nodiscard]] static bool fill(SDL_Window* window, Uint8 r = 0x00, Uint8 g = 0x00,
+	                               Uint8 b = 0x00, Uint8 a = 0xff);
+	[[nodiscard]] static rdpMonitor query(SDL_Window* window, SDL_DisplayID id,
+	                                      bool forceAsPrimary = false);
+	[[nodiscard]] static SDL_Rect rect(SDL_Window* window, bool forceAsPrimary = false);
+	[[nodiscard]] static SDL_Rect rect(SDL_DisplayID id, bool forceAsPrimary = false);
+
+	[[nodiscard]] static bool tryFallback(bool isFullscreen);
+
+	enum HighDPIMode
+	{
+		MODE_INVALID,
+		MODE_NONE,
+		MODE_WINDOWS,
+		MODE_MACOS
+	};
+
+	[[nodiscard]] static enum HighDPIMode isHighDPIWindowsMode(SDL_Window* window);
+
   private:
-	static UINT32 orientaion_to_rdp(SDL_DisplayOrientation orientation);
+	void ensureRenderTarget();
+	bool ensureGdiTexture(SDL_Surface* surface);
 
 	SDL_Window* _window = nullptr;
+	SDL_Renderer* _renderer = nullptr;
+	SDL_Texture* _renderTarget = nullptr;
+	SDL_Texture* _gdiTexture = nullptr;
+	int _gdiTextureW = 0;
+	int _gdiTextureH = 0;
+	int _initialW = 0;
+	int _initialH = 0;
+	SDL_DisplayID _displayID = 0;
 	Sint32 _offset_x = 0;
 	Sint32 _offset_y = 0;
+	rdpMonitor _monitor{};
 };

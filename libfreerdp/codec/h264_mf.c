@@ -18,6 +18,8 @@
  */
 
 #include <winpr/winpr.h>
+#include <winpr/library.h>
+
 #include <freerdp/log.h>
 #include <freerdp/codec/h264.h>
 
@@ -90,6 +92,8 @@ typedef struct
 	pfnMFCreateSample MFCreateSample;
 	pfnMFCreateMemoryBuffer MFCreateMemoryBuffer;
 	pfnMFCreateMediaType MFCreateMediaType;
+	UINT32 stride;
+	BOOL bottomUp;
 } H264_CONTEXT_MF;
 
 static HRESULT mf_find_output_type(H264_CONTEXT_MF* sys, const GUID* guid,
@@ -98,7 +102,7 @@ static HRESULT mf_find_output_type(H264_CONTEXT_MF* sys, const GUID* guid,
 	DWORD idx = 0;
 	GUID mediaGuid;
 	HRESULT hr = S_OK;
-	IMFMediaType* pMediaType = NULL;
+	IMFMediaType* pMediaType = nullptr;
 
 	while (1)
 	{
@@ -130,7 +134,7 @@ static HRESULT mf_create_output_sample(H264_CONTEXT* h264, H264_CONTEXT_MF* sys)
 	if (sys->outputSample)
 	{
 		sys->outputSample->lpVtbl->Release(sys->outputSample);
-		sys->outputSample = NULL;
+		sys->outputSample = nullptr;
 	}
 
 	hr = sys->MFCreateSample(&sys->outputSample);
@@ -157,7 +161,7 @@ static HRESULT mf_create_output_sample(H264_CONTEXT* h264, H264_CONTEXT_MF* sys)
 		goto error;
 	}
 
-	sys->outputSample->lpVtbl->AddBuffer(sys->outputSample, sys->outputBuffer);
+	hr = sys->outputSample->lpVtbl->AddBuffer(sys->outputSample, sys->outputBuffer);
 
 	if (FAILED(hr))
 	{
@@ -170,21 +174,55 @@ error:
 	return hr;
 }
 
-static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSize)
+/* IYUV output: full size Y plane followed by the quarter size U and V planes */
+WINPR_ATTR_NODISCARD
+static size_t getSrcOffset(const H264_CONTEXT_MF* sys, UINT32 line, size_t plane)
 {
-	HRESULT hr;
-	BYTE* pbBuffer = NULL;
+	WINPR_ASSERT(sys);
+
+	const size_t stride = (plane == 0) ? sys->stride : sys->stride / 2u;
+	const size_t height = (plane == 0) ? sys->frameHeight : sys->frameHeight / 2u;
+	size_t offset = 0;
+	if (plane > 0)
+		offset += (size_t)sys->stride * sys->frameHeight;
+	if (plane > 1)
+		offset += stride * height;
+
+	WINPR_ASSERT(line < height);
+	const size_t row = sys->bottomUp ? height - line - 1u : line;
+	return offset + row * stride;
+}
+
+static HRESULT mf_process_output(H264_CONTEXT_MF* sys)
+{
+	DWORD status = 0;
+	MFT_OUTPUT_DATA_BUFFER buffer = WINPR_C_ARRAY_INIT;
+
+	buffer.pSample = sys->outputSample;
+	const HRESULT hr =
+	    sys->transform->lpVtbl->ProcessOutput(sys->transform, 0, 1, &buffer, &status);
+	if (buffer.pEvents)
+		buffer.pEvents->lpVtbl->Release(buffer.pEvents);
+	return hr;
+}
+
+static int mf_decompress(H264_CONTEXT* WINPR_RESTRICT h264, const BYTE* WINPR_RESTRICT pSrcData,
+                         UINT32 SrcSize)
+{
+	int rc = -1;
+	BYTE* pbBuffer = nullptr;
 	DWORD cbMaxLength = 0;
 	DWORD cbCurrentLength = 0;
-	DWORD outputStatus = 0;
-	IMFSample* inputSample = NULL;
-	IMFMediaBuffer* inputBuffer = NULL;
-	IMFMediaBuffer* outputBuffer = NULL;
-	MFT_OUTPUT_DATA_BUFFER outputDataBuffer;
+	IMFSample* inputSample = nullptr;
+	IMFMediaBuffer* inputBuffer = nullptr;
+	IMFMediaBuffer* outputBuffer = nullptr;
+
+	WINPR_ASSERT(h264);
+
 	H264_CONTEXT_MF* sys = (H264_CONTEXT_MF*)h264->pSystemData;
 	UINT32* iStride = h264->iStride;
 	BYTE** pYUVData = h264->pYUVData;
-	hr = sys->MFCreateMemoryBuffer(SrcSize, &inputBuffer);
+	HRESULT hr = sys->MFCreateMemoryBuffer(SrcSize, &inputBuffer);
 
 	if (FAILED(hr))
 	{
@@ -225,7 +263,7 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 		goto error;
 	}
 
-	inputSample->lpVtbl->AddBuffer(inputSample, inputBuffer);
+	hr = inputSample->lpVtbl->AddBuffer(inputSample, inputBuffer);
 
 	if (FAILED(hr))
 	{
@@ -233,7 +271,6 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 		goto error;
 	}
 
-	inputBuffer->lpVtbl->Release(inputBuffer);
 	hr = sys->transform->lpVtbl->ProcessInput(sys->transform, 0, inputSample, 0);
 
 	if (FAILED(hr))
@@ -250,22 +287,16 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 		goto error;
 	}
 
-	outputDataBuffer.dwStreamID = 0;
-	outputDataBuffer.dwStatus = 0;
-	outputDataBuffer.pEvents = NULL;
-	outputDataBuffer.pSample = sys->outputSample;
-	hr = sys->transform->lpVtbl->ProcessOutput(sys->transform, 0, 1, &outputDataBuffer,
-	                                           &outputStatus);
+	hr = mf_process_output(sys);
 
 	if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
 	{
-		UINT32 stride = 0;
 		UINT64 frameSize = 0;
 
 		if (sys->outputType)
 		{
 			sys->outputType->lpVtbl->Release(sys->outputType);
-			sys->outputType = NULL;
+			sys->outputType = nullptr;
 		}
 
 		hr = mf_find_output_type(sys, &sMFVideoFormat_IYUV, &sys->outputType);
@@ -304,7 +335,8 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 
 		sys->frameWidth = (UINT32)(frameSize >> 32);
 		sys->frameHeight = (UINT32)frameSize;
-		hr = sys->outputType->lpVtbl->GetUINT32(sys->outputType, &sMF_MT_DEFAULT_STRIDE, &stride);
+		hr = sys->outputType->lpVtbl->GetUINT32(sys->outputType, &sMF_MT_DEFAULT_STRIDE,
+		                                        &sys->stride);
 
 		if (FAILED(hr))
 		{
@@ -313,12 +345,20 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 			goto error;
 		}
 
-		if (!avc420_ensure_buffer(h264, stride, sys->frameWidth, sys->frameHeight))
+		const INT32 istride = (INT32)sys->stride;
+		sys->bottomUp = (istride < 0);
+		if (sys->bottomUp)
+			sys->stride = istride * -1;
+
+		if (!avc420_ensure_buffer(h264, sys->stride, sys->frameWidth, sys->frameHeight))
 			goto error;
+
+		/* the decoder still holds the frame, fetch it with the new output type */
+		hr = mf_process_output(sys);
 	}
-	else if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
-	{
-	}
+
+	if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
+		rc = 0;
 	else if (FAILED(hr))
 	{
 		WLog_Print(h264->log, WLOG_ERROR, "ProcessOutput failure: 0x%08" PRIX32 "", hr);
@@ -326,8 +366,7 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 	}
 	else
 	{
-		int offset = 0;
-		BYTE* buffer = NULL;
+		BYTE* buffer = nullptr;
 		DWORD bufferCount = 0;
 		DWORD cbMaxLength = 0;
 		DWORD cbCurrentLength = 0;
@@ -355,12 +394,34 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 			goto error;
 		}
 
-		CopyMemory(pYUVData[0], &buffer[offset], iStride[0] * sys->frameHeight);
-		offset += iStride[0] * sys->frameHeight;
-		CopyMemory(pYUVData[1], &buffer[offset], iStride[1] * (sys->frameHeight / 2));
-		offset += iStride[1] * (sys->frameHeight / 2);
-		CopyMemory(pYUVData[2], &buffer[offset], iStride[2] * (sys->frameHeight / 2));
-		offset += iStride[2] * (sys->frameHeight / 2);
+		if ((sys->stride == 0) || (cbCurrentLength / 3u / sys->stride < sys->frameHeight / 2u))
+		{
+			WLog_Print(h264->log, WLOG_ERROR, "output buffer too small: %" PRIu32 "",
+			           cbCurrentLength);
+			(void)outputBuffer->lpVtbl->Unlock(outputBuffer);
+			goto error;
+		}
+
+		/* Copy data from decoder buffer to our YUV buffer.
+		 * strides differ (the YUV buffer is always larger) so copy only data available from the
+		 * decoder buffer but increment the YUV buffer with the YUV buffer strides.
+		 */
+		for (UINT32 x = 0; x < sys->frameHeight; x++)
+		{
+			const size_t srcOffset = getSrcOffset(sys, x, 0);
+			const UINT32 dstOffset = (UINT32)iStride[0] * x;
+			CopyMemory(&pYUVData[0][dstOffset], &buffer[srcOffset], sys->stride);
+		}
+		for (UINT32 x = 0; x < sys->frameHeight / 2; x++)
+		{
+			const size_t srcUOffset = getSrcOffset(sys, x, 1);
+			const size_t srcVOffset = getSrcOffset(sys, x, 2);
+			const UINT32 dstUOffset = (UINT32)iStride[1] * x;
+			const UINT32 dstVOffset = (UINT32)iStride[2] * x;
+			CopyMemory(&pYUVData[1][dstUOffset], &buffer[srcUOffset], sys->stride / 2u);
+			CopyMemory(&pYUVData[2][dstVOffset], &buffer[srcVOffset], sys->stride / 2u);
+		}
+
 		hr = outputBuffer->lpVtbl->Unlock(outputBuffer);
 
 		if (FAILED(hr))
@@ -369,21 +430,30 @@ static int mf_decompress(H264_CONTEXT* h264, const BYTE* pSrcData, UINT32 SrcSiz
 			goto error;
 		}
 
-		outputBuffer->lpVtbl->Release(outputBuffer);
+		h264->YUVWidth = sys->frameWidth;
+		h264->YUVHeight = sys->frameHeight;
+		rc = 1;
 	}
 
-	inputSample->lpVtbl->Release(inputSample);
-	return 1;
 error:
-	(void)fprintf(stderr, "mf_decompress error\n");
-	return -1;
+	if (outputBuffer)
+		outputBuffer->lpVtbl->Release(outputBuffer);
+	if (inputSample)
+		inputSample->lpVtbl->Release(inputSample);
+	if (inputBuffer)
+		inputBuffer->lpVtbl->Release(inputBuffer);
+	if (rc < 0)
+		WLog_Print(h264->log, WLOG_ERROR, "decompression failed");
+	return rc;
 }
 
-static int mf_compress(H264_CONTEXT* h264, const BYTE** ppSrcYuv, const UINT32* pStride,
-                       BYTE** ppDstData, UINT32* pDstSize)
+static int mf_compress(H264_CONTEXT* WINPR_RESTRICT h264, const BYTE** WINPR_RESTRICT ppSrcYuv,
+                       const UINT32* WINPR_RESTRICT pStride, BYTE** WINPR_RESTRICT ppDstData,
+                       UINT32* WINPR_RESTRICT pDstSize)
 {
 	H264_CONTEXT_MF* sys = (H264_CONTEXT_MF*)h264->pSystemData;
-	return 1;
+	WLog_Print(h264->log, WLOG_ERROR, "TODO: compression not implemented");
+	return -1;
 }
 
 static BOOL mf_plat_loaded(H264_CONTEXT_MF* sys)
@@ -401,31 +471,31 @@ static void mf_uninit(H264_CONTEXT* h264)
 		if (sys->transform)
 		{
 			sys->transform->lpVtbl->Release(sys->transform);
-			sys->transform = NULL;
+			sys->transform = nullptr;
 		}
 
 		if (sys->codecApi)
 		{
 			sys->codecApi->lpVtbl->Release(sys->codecApi);
-			sys->codecApi = NULL;
+			sys->codecApi = nullptr;
 		}
 
 		if (sys->inputType)
 		{
 			sys->inputType->lpVtbl->Release(sys->inputType);
-			sys->inputType = NULL;
+			sys->inputType = nullptr;
 		}
 
 		if (sys->outputType)
 		{
 			sys->outputType->lpVtbl->Release(sys->outputType);
-			sys->outputType = NULL;
+			sys->outputType = nullptr;
 		}
 
 		if (sys->outputSample)
 		{
 			sys->outputSample->lpVtbl->Release(sys->outputSample);
-			sys->outputSample = NULL;
+			sys->outputSample = nullptr;
 		}
 
 		if (sys->mfplat)
@@ -434,7 +504,7 @@ static void mf_uninit(H264_CONTEXT* h264)
 				sys->MFShutdown();
 
 			FreeLibrary(sys->mfplat);
-			sys->mfplat = NULL;
+			sys->mfplat = nullptr;
 
 			if (mf_plat_loaded(sys))
 				CoUninitialize();
@@ -447,7 +517,7 @@ static void mf_uninit(H264_CONTEXT* h264)
 		memset(h264->iStride, 0, sizeof(h264->iStride));
 
 		free(sys);
-		h264->pSystemData = NULL;
+		h264->pSystemData = nullptr;
 	}
 }
 
@@ -478,14 +548,14 @@ static BOOL mf_init(H264_CONTEXT* h264)
 	if (!mf_plat_loaded(sys))
 		goto error;
 
-	CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+	CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
 	if (h264->Compressor)
 	{
 	}
 	else
 	{
-		VARIANT var = { 0 };
+		VARIANT var = WINPR_C_ARRAY_INIT;
 		hr = sys->MFStartup(MF_VERSION, 0);
 
 		if (FAILED(hr))
@@ -494,7 +564,7 @@ static BOOL mf_init(H264_CONTEXT* h264)
 			goto error;
 		}
 
-		hr = CoCreateInstance(&sCLSID_CMSH264DecoderMFT, NULL, CLSCTX_INPROC_SERVER,
+		hr = CoCreateInstance(&sCLSID_CMSH264DecoderMFT, nullptr, CLSCTX_INPROC_SERVER,
 		                      &sIID_IMFTransform, (void**)&sys->transform);
 
 		if (FAILED(hr))
@@ -514,8 +584,8 @@ static BOOL mf_init(H264_CONTEXT* h264)
 			goto error;
 		}
 
-		var.vt = VT_UI4;
-		var.ulVal = 1;
+		var.n1.n2.vt = VT_UI4;
+		var.n1.n2.n3.ulVal = 1;
 		hr = sys->codecApi->lpVtbl->SetValue(sys->codecApi, &sCODECAPI_AVLowLatencyMode, &var);
 
 		if (FAILED(hr))

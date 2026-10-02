@@ -53,7 +53,7 @@ option(WITH_SAMPLE "Build sample code" ON)
 
 option(WITH_CLIENT_COMMON "Build client common library" ON)
 cmake_dependent_option(WITH_CLIENT "Build client binaries" ON "WITH_CLIENT_COMMON" OFF)
-cmake_dependent_option(WITH_CLIENT_SDL "[experimental] Build SDL client " ON "WITH_CLIENT" OFF)
+cmake_dependent_option(WITH_CLIENT_SDL "Build SDL client " ON "WITH_CLIENT" OFF)
 
 option(WITH_SERVER "Build server binaries" ON)
 
@@ -99,7 +99,6 @@ option(WITH_DEBUG_CAPABILITIES "Print capability negotiation debug messages." ${
 option(WITH_DEBUG_CHANNELS "Print channel manager debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_CLIPRDR "Print clipboard redirection debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_CODECS "Print codec debug messages" ${DEFAULT_DEBUG_OPTION})
-option(WITH_DEBUG_RDPGFX "Print RDPGFX debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_DVC "Print dynamic virtual channel debug messages." ${DEFAULT_DEBUG_OPTION})
 cmake_dependent_option(
   WITH_DEBUG_TSMF "Print TSMF virtual channel debug messages." ${DEFAULT_DEBUG_OPTION} "CHANNEL_TSMF" OFF
@@ -133,9 +132,6 @@ option(WITH_DEBUG_SVC "Print static virtual channel debug messages." ${DEFAULT_D
 option(WITH_DEBUG_TRANSPORT "Print transport debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_TIMEZONE "Print timezone debug messages." ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_WND "Print window order debug messages" ${DEFAULT_DEBUG_OPTION})
-option(WITH_DEBUG_X11_LOCAL_MOVESIZE "Print X11 Client local movesize debug messages" ${DEFAULT_DEBUG_OPTION})
-option(WITH_DEBUG_X11 "Print X11 Client debug messages" ${DEFAULT_DEBUG_OPTION})
-option(WITH_DEBUG_XV "Print XVideo debug messages" ${DEFAULT_DEBUG_OPTION})
 option(WITH_DEBUG_RINGBUFFER "Enable Ringbuffer debug messages" ${DEFAULT_DEBUG_OPTION})
 
 option(WITH_DEBUG_SYMBOLS "Pack debug symbols to installer" OFF)
@@ -144,15 +140,21 @@ option(WITH_CLANG_FORMAT "Detect clang-format. run 'cmake --build . --target cla
 
 option(WITH_DSP_EXPERIMENTAL "Enable experimental sound encoder/decoder formats" OFF)
 
+option(WITH_GFX_AV1 "[experimental,unstable ABI/API] Enable AV1 support for GFX channel encoding/decoding" OFF)
+option(WITH_GFX_AZURE "[experimental,unstable ABI/API] Enable Azure extension support for GFX channel" OFF)
 option(WITH_FFMPEG "Enable FFMPEG for audio/video encoding/decoding" ON)
 cmake_dependent_option(WITH_DSP_FFMPEG "Use FFMPEG for audio encoding/decoding" ON "WITH_FFMPEG" OFF)
 cmake_dependent_option(WITH_VIDEO_FFMPEG "Use FFMPEG for video encoding/decoding" ON "WITH_FFMPEG" OFF)
-cmake_dependent_option(WITH_VAAPI "[experimental] Use FFMPEG VAAPI" OFF "WITH_VIDEO_FFMPEG" OFF)
 cmake_dependent_option(
-  WITH_VAAPI_H264_ENCODING "[experimental] Use FFMPEG VAAPI hardware H264 encoding" ON "WITH_VIDEO_FFMPEG" OFF
+  WITH_FFMPEG_HWACCEL "[experimental] Use FFMPEG hardware acceleration" OFF "WITH_VIDEO_FFMPEG" OFF
 )
-if(WITH_VAAPI_H264_ENCODING)
-  add_definitions("-DWITH_VAAPI_H264_ENCODING")
+
+if(WITH_VIDEOTOOLBOX OR WITH_VAAPI OR WITH_VAAPI_H264_ENCODING)
+  message(
+    WARNING
+      "WITH_VAAPI, WITH_VAAPI_H264_ENCODING and WITH_VIDEOTOOLBOX are deprecated, use WITH_FFMPEG_HWACCEL instead!"
+  )
+  set(WITH_FFMPEG_HWACCEL ON CACHE BOOL "externally set")
 endif()
 
 option(WITH_CAIRO "Use CAIRO image library for screen resizing" OFF)
@@ -166,20 +168,15 @@ if(IOS)
   include(ConfigOptionsiOS)
 endif(IOS)
 
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND NOT ANDROID)
   find_package(ALSA)
   find_package(PulseAudio)
   find_package(OSS)
-  option(WITH_ALSA "use alsa for sound" ${ALSA_FOUND})
-  option(WITH_PULSE "use alsa for sound" ${PULSE_FOUND})
-  option(WITH_OSS "use alsa for sound" ${OSS_FOUND})
-endif()
-
-if(OPENBSD)
   find_package(SNDIO)
-  option(WITH_SNDIO "use SNDIO for sound" ${SNDIO_FOUND # OpenBSD
-         endif () }
-  )
+  option(WITH_ALSA "use ALSA for sound" ${ALSA_FOUND})
+  option(WITH_PULSE "use Pulse for sound" ${PulseAudio_FOUND})
+  option(WITH_OSS "use OSS for sound" ${OSS_FOUND})
+  option(WITH_SNDIO "use Sndio for sound" ${SNDIO_FOUND})
 endif()
 
 option(BUILD_FUZZERS "Use BUILD_FUZZERS to build fuzzing tests" OFF)

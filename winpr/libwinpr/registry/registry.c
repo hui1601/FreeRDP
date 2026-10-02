@@ -42,9 +42,9 @@
 #include "../log.h"
 #define TAG WINPR_TAG("registry")
 
-static Reg* instance = NULL;
+static Reg* instance = nullptr;
 
-static size_t regsz_length(const char* key, const void* value, bool unicode)
+static size_t regsz_length(const char* key, const void* value)
 {
 	/* https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-element-size-limits
 	 *
@@ -52,11 +52,7 @@ static size_t regsz_length(const char* key, const void* value, bool unicode)
 	 * file.
 	 */
 	const size_t limit = 16383;
-	size_t length = 0;
-	if (unicode)
-		length = _wcsnlen((const WCHAR*)value, limit);
-	else
-		length = strnlen((const char*)value, limit);
+	size_t length = strnlen((const char*)value, limit);
 	if (length >= limit)
 		WLog_WARN(TAG, "REG_SZ[%s] truncated to size %" PRIuz, key, length);
 	return length;
@@ -290,7 +286,7 @@ LONG RegOpenCurrentUser(WINPR_ATTR_UNUSED REGSAM samDesired, WINPR_ATTR_UNUSED P
 LONG RegOpenKeyExW(HKEY hKey, LPCWSTR lpSubKey, DWORD ulOptions, REGSAM samDesired, PHKEY phkResult)
 {
 	LONG rc = 0;
-	char* str = ConvertWCharToUtf8Alloc(lpSubKey, NULL);
+	char* str = ConvertWCharToUtf8Alloc(lpSubKey, nullptr);
 	if (!str)
 		return ERROR_FILE_NOT_FOUND;
 
@@ -316,7 +312,7 @@ LONG RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, WINPR_ATTR_UNUSED DWORD ulOptions
 	WINPR_ASSERT(reg->root_key);
 	RegKey* pKey = reg->root_key->subkeys;
 
-	while (pKey != NULL)
+	while (pKey != nullptr)
 	{
 		WINPR_ASSERT(lpSubKey);
 
@@ -329,7 +325,7 @@ LONG RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, WINPR_ATTR_UNUSED DWORD ulOptions
 		pKey = pKey->next;
 	}
 
-	*phkResult = NULL;
+	*phkResult = nullptr;
 
 	return ERROR_FILE_NOT_FOUND;
 }
@@ -371,7 +367,7 @@ LONG RegQueryInfoKeyA(WINPR_ATTR_UNUSED HKEY hKey, WINPR_ATTR_UNUSED LPSTR lpCla
 
 static LONG reg_read_int(const RegVal* pValue, LPBYTE lpData, LPDWORD lpcbData)
 {
-	const BYTE* ptr = NULL;
+	const BYTE* ptr = nullptr;
 	DWORD required = 0;
 
 	WINPR_ASSERT(pValue);
@@ -402,7 +398,7 @@ static LONG reg_read_int(const RegVal* pValue, LPBYTE lpData, LPDWORD lpcbData)
 		}
 	}
 
-	if (lpData != NULL)
+	if (lpData != nullptr)
 	{
 		DWORD size = 0;
 		WINPR_ASSERT(lpcbData);
@@ -413,7 +409,7 @@ static LONG reg_read_int(const RegVal* pValue, LPBYTE lpData, LPDWORD lpcbData)
 			return ERROR_MORE_DATA;
 		memcpy(lpData, ptr, required);
 	}
-	else if (lpcbData != NULL)
+	else if (lpcbData != nullptr)
 		*lpcbData = required;
 	return ERROR_SUCCESS;
 }
@@ -424,22 +420,22 @@ LONG RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWOR
 // NOLINTEND(readability-non-const-parameter)
 {
 	LONG status = ERROR_FILE_NOT_FOUND;
-	RegKey* key = NULL;
-	RegVal* pValue = NULL;
-	char* valueName = NULL;
+	RegKey* key = nullptr;
+	RegVal* pValue = nullptr;
+	char* valueName = nullptr;
 
 	WINPR_UNUSED(lpReserved);
 
 	key = (RegKey*)hKey;
 	WINPR_ASSERT(key);
 
-	valueName = ConvertWCharToUtf8Alloc(lpValueName, NULL);
+	valueName = ConvertWCharToUtf8Alloc(lpValueName, nullptr);
 	if (!valueName)
 		goto end;
 
 	pValue = key->values;
 
-	while (pValue != NULL)
+	while (pValue != nullptr)
 	{
 		if (strcmp(pValue->name, valueName) == 0)
 		{
@@ -456,10 +452,10 @@ LONG RegQueryValueExW(HKEY hKey, LPCWSTR lpValueName, LPDWORD lpReserved, LPDWOR
 				case REG_SZ:
 				{
 					const size_t length =
-					    regsz_length(pValue->name, pValue->data.string, TRUE) * sizeof(WCHAR);
+					    regsz_length(pValue->name, pValue->data.string) * sizeof(WCHAR);
 
 					status = ERROR_SUCCESS;
-					if (lpData != NULL)
+					if (lpData != nullptr)
 					{
 						DWORD size = 0;
 						union
@@ -503,8 +499,8 @@ LONG RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD
                       LPBYTE lpData, LPDWORD lpcbData)
 // NOLINTEND(readability-non-const-parameter)
 {
-	RegKey* key = NULL;
-	RegVal* pValue = NULL;
+	RegKey* key = nullptr;
+	RegVal* pValue = nullptr;
 
 	WINPR_UNUSED(lpReserved);
 
@@ -513,7 +509,7 @@ LONG RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD
 
 	pValue = key->values;
 
-	while (pValue != NULL)
+	while (pValue != nullptr)
 	{
 		if (strcmp(pValue->name, lpValueName) == 0)
 		{
@@ -528,11 +524,11 @@ LONG RegQueryValueExA(HKEY hKey, LPCSTR lpValueName, LPDWORD lpReserved, LPDWORD
 					return reg_read_int(pValue, lpData, lpcbData);
 				case REG_SZ:
 				{
-					const size_t length = regsz_length(pValue->name, pValue->data.string, FALSE);
+					const size_t length = regsz_length(pValue->name, pValue->data.string);
 
 					char* pData = (char*)lpData;
 
-					if (pData != NULL)
+					if (pData != nullptr)
 					{
 						DWORD size = 0;
 						WINPR_ASSERT(lpcbData);

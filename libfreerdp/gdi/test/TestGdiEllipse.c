@@ -91,12 +91,12 @@ int TestGdiEllipse(int argc, char* argv[])
 
 	for (UINT32 i = 0; i < number_formats; i++)
 	{
-		HGDI_DC hdc = NULL;
-		HGDI_PEN pen = NULL;
-		HGDI_BITMAP hBmp = NULL;
-		HGDI_BITMAP hBmp_Ellipse_1 = NULL;
-		HGDI_BITMAP hBmp_Ellipse_2 = NULL;
-		HGDI_BITMAP hBmp_Ellipse_3 = NULL;
+		HGDI_DC hdc = nullptr;
+		HGDI_PEN pen = nullptr;
+		HGDI_BITMAP hBmp = nullptr;
+		HGDI_BITMAP hBmp_Ellipse_1 = nullptr;
+		HGDI_BITMAP hBmp_Ellipse_2 = nullptr;
+		HGDI_BITMAP hBmp_Ellipse_3 = nullptr;
 		const UINT32 format = colorFormats[i];
 		gdiPalette* hPalette = &g;
 		g.format = format;
@@ -113,7 +113,8 @@ int TestGdiEllipse(int argc, char* argv[])
 		}
 
 		hdc->format = format;
-		gdi_SetNullClipRgn(hdc);
+		if (!gdi_SetNullClipRgn(hdc))
+			goto fail;
 
 		if (!(pen = gdi_CreatePen(1, 1, 0, format, hPalette)))
 		{

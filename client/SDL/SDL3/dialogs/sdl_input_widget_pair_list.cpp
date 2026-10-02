@@ -22,6 +22,7 @@
 
 #include <winpr/cast.h>
 
+#include "../sdl_utils.hpp"
 #include "sdl_widget_list.hpp"
 #include "sdl_input_widget_pair_list.hpp"
 
@@ -38,11 +39,11 @@ SdlInputWidgetPairList::SdlInputWidgetPairList(const std::string& title,
 	const std::vector<std::string> buttonlabels = { "accept", "cancel" };
 
 	const size_t widget_width = 300;
-	const size_t widget_heigth = 50;
+	const size_t widget_height = 50;
 
 	const size_t total_width = widget_width + widget_width;
-	const size_t input_height = labels.size() * (widget_heigth + vpadding) + vpadding;
-	const size_t total_height = input_height + widget_heigth;
+	const size_t input_height = labels.size() * (widget_height + vpadding) + vpadding;
+	const size_t total_height = input_height + widget_height;
 	assert(total_width <= INT32_MAX);
 	assert(total_height <= INT32_MAX);
 
@@ -50,14 +51,15 @@ SdlInputWidgetPairList::SdlInputWidgetPairList(const std::string& title,
 	{
 		for (size_t x = 0; x < labels.size(); x++)
 		{
-			std::shared_ptr<SdlInputWidgetPair> widget(new SdlInputWidgetPair(
-			    _renderer, labels[x], initial[x], flags[x], x, widget_width, widget_heigth));
+			auto widget =
+			    std::make_shared<SdlInputWidgetPair>(_renderer, labels.at(x), initial.at(x),
+			                                         flags.at(x), x, widget_width, widget_height);
 			m_list.emplace_back(widget);
 		}
 
-		_buttons.populate(_renderer, buttonlabels, buttonids, total_width,
-		                  static_cast<Sint32>(input_height), static_cast<Sint32>(widget_width),
-		                  static_cast<Sint32>(widget_heigth));
+		std::ignore = _buttons.populate(
+		    _renderer, buttonlabels, buttonids, total_width, static_cast<Sint32>(input_height),
+		    static_cast<Sint32>(widget_width), static_cast<Sint32>(widget_height));
 		_buttons.set_highlight(0);
 		m_currentActiveTextInput = selected;
 	}
@@ -95,7 +97,7 @@ bool SdlInputWidgetPairList::valid(ssize_t current) const
 	auto s = static_cast<size_t>(current);
 	if (s >= m_list.size())
 		return false;
-	return !m_list[s]->readonly();
+	return !m_list.at(s)->readonly();
 }
 
 std::shared_ptr<SdlInputWidgetPair> SdlInputWidgetPairList::get(ssize_t index)
@@ -105,7 +107,7 @@ std::shared_ptr<SdlInputWidgetPair> SdlInputWidgetPairList::get(ssize_t index)
 	auto s = static_cast<size_t>(index);
 	if (s >= m_list.size())
 		return nullptr;
-	return m_list[s];
+	return m_list.at(s);
 }
 
 SdlInputWidgetPairList::~SdlInputWidgetPairList()
@@ -133,7 +135,7 @@ ssize_t SdlInputWidgetPairList::get_index(const SDL_MouseButtonEvent& button)
 	const auto y = button.y;
 	for (size_t i = 0; i < m_list.size(); i++)
 	{
-		auto& cur = m_list[i];
+		auto& cur = m_list.at(i);
 		auto r = cur->input_rect();
 
 		if ((x >= r.x) && (x <= r.x + r.w) && (y >= r.y) && (y <= r.y + r.h))
@@ -160,11 +162,11 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 		while (running)
 		{
 			if (!update())
-				throw;
+				throw std::exception();
 
 			SDL_Event event = {};
-			if (!SDL_WaitEvent(&event))
-				throw;
+			if (!SDL_WaitEventTimeout(&event, 30))
+				continue;
 			do
 			{
 				switch (event.type)
@@ -181,12 +183,12 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 									if ((event.key.mod & SDL_KMOD_CTRL) != 0)
 									{
 										if (!cur->set_str(""))
-											throw;
+											throw std::exception();
 									}
 									else
 									{
 										if (!cur->remove_str(1))
-											throw;
+											throw std::exception();
 									}
 								}
 							}
@@ -211,7 +213,8 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 									if (cur)
 									{
 										auto text = SDL_GetClipboardText();
-										cur->set_str(text);
+										if (!cur->set_str(text))
+											throw std::exception();
 									}
 								}
 								break;
@@ -226,7 +229,7 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 						if (cur)
 						{
 							if (!cur->append_str(event.text.text))
-								throw;
+								throw std::exception();
 						}
 					}
 					break;
@@ -235,14 +238,12 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 						auto TextInputIndex = get_index(event.button);
 						for (auto& cur : m_list)
 						{
-							if (!cur->set_mouseover(false))
-								throw;
+							cur->set_mouseover(false);
 						}
 						if (TextInputIndex >= 0)
 						{
-							auto& cur = m_list[static_cast<size_t>(TextInputIndex)];
-							if (!cur->set_mouseover(true))
-								throw;
+							auto& cur = m_list.at(static_cast<size_t>(TextInputIndex));
+							cur->set_mouseover(true);
 						}
 
 						_buttons.set_mouseover(event.button.x, event.button.y);
@@ -265,6 +266,11 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 						}
 					}
 					break;
+					case SDL_EVENT_WINDOW_OCCLUDED:
+					case SDL_EVENT_WINDOW_MINIMIZED:
+					case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+					case SDL_EVENT_TERMINATING:
+					case SDL_EVENT_WINDOW_DESTROYED:
 					case SDL_EVENT_QUIT:
 						res = INPUT_BUTTON_CANCEL;
 						running = false;
@@ -272,7 +278,7 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 					default:
 						break;
 				}
-			} while (SDL_PollEvent(&event));
+			} while (running && SDL_PollEvent(&event));
 
 			if (LastActiveTextInput != m_currentActiveTextInput)
 			{
@@ -282,13 +288,13 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 			for (auto& cur : m_list)
 			{
 				if (!cur->set_highlight(false))
-					throw;
+					throw std::exception();
 			}
 			auto cur = get(m_currentActiveTextInput);
 			if (cur)
 			{
 				if (!cur->set_highlight(true))
-					throw;
+					throw std::exception();
 			}
 
 			auto rc = SDL_RenderPresent(_renderer.get());
@@ -306,8 +312,20 @@ int SdlInputWidgetPairList::run(std::vector<std::string>& result)
 	{
 		res = -2;
 	}
+
+	SDL_PumpEvents();
+	SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_USER);
+
 	if (!SDL_StopTextInput(_window.get()))
 		return -4;
 
 	return res;
+}
+
+void SdlInputWidgetPairList::parent(SDL_Window* parent)
+{
+	if (!parent)
+		return;
+	SDL_SetWindowParent(_window.get(), parent);
+	SDL_SetWindowModal(_window.get(), true);
 }

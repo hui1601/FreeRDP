@@ -30,6 +30,7 @@
 #ifndef _WIN32
 
 #include <errno.h>
+#include <fcntl.h>
 #include "../handle/handle.h"
 #include "../log.h"
 #define TAG WINPR_TAG("synch.semaphore")
@@ -63,7 +64,7 @@ static DWORD SemaphoreCleanupHandle(HANDLE handle)
 
 	if (length != 1)
 	{
-		char ebuffer[256] = { 0 };
+		char ebuffer[256] = WINPR_C_ARRAY_INIT;
 		WLog_ERR(TAG, "semaphore read() failure [%d] %s", errno,
 		         winpr_strerror(errno, ebuffer, sizeof(ebuffer)));
 		return WAIT_FAILED;
@@ -100,7 +101,6 @@ BOOL SemaphoreCloseHandle(HANDLE handle)
 	sem_destroy((winpr_sem_t*)semaphore->sem);
 #endif
 #endif
-	free(semaphore);
 	return TRUE;
 }
 
@@ -108,47 +108,63 @@ static HANDLE_OPS ops = { SemaphoreIsHandled,
 	                      SemaphoreCloseHandle,
 	                      SemaphoreGetFd,
 	                      SemaphoreCleanupHandle,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL,
-	                      NULL };
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr,
+	                      nullptr };
 
 HANDLE CreateSemaphoreW(WINPR_ATTR_UNUSED LPSECURITY_ATTRIBUTES lpSemaphoreAttributes,
                         LONG lInitialCount, WINPR_ATTR_UNUSED LONG lMaximumCount,
                         WINPR_ATTR_UNUSED LPCWSTR lpName)
 {
-	HANDLE handle = NULL;
-	WINPR_SEMAPHORE* semaphore = NULL;
+	HANDLE handle = nullptr;
+	WINPR_SEMAPHORE* semaphore = nullptr;
 	semaphore = (WINPR_SEMAPHORE*)calloc(1, sizeof(WINPR_SEMAPHORE));
 
 	if (!semaphore)
-		return NULL;
+		return nullptr;
 
 	semaphore->pipe_fd[0] = -1;
 	semaphore->pipe_fd[1] = -1;
-	semaphore->sem = (winpr_sem_t*)NULL;
+	semaphore->sem = (winpr_sem_t*)nullptr;
 	semaphore->common.ops = &ops;
 #ifdef WINPR_PIPE_SEMAPHORE
 
+#ifdef WINPR_HAVE_PIPE2
+	if (pipe2(semaphore->pipe_fd, O_CLOEXEC) < 0)
+#else
 	if (pipe(semaphore->pipe_fd) < 0)
+#endif
 	{
 		WLog_ERR(TAG, "failed to create semaphore");
 		free(semaphore);
-		return NULL;
+		return nullptr;
 	}
+
+#ifndef WINPR_HAVE_PIPE2
+	if (!winpr_set_cloexec(semaphore->pipe_fd[0], TRUE) ||
+	    !winpr_set_cloexec(semaphore->pipe_fd[1], TRUE))
+	{
+		WLog_ERR(TAG, "failed to set close-on-exec on semaphore pipe");
+		close(semaphore->pipe_fd[0]);
+		close(semaphore->pipe_fd[1]);
+		free(semaphore);
+		return nullptr;
+	}
+#endif
 
 	while (lInitialCount > 0)
 	{
@@ -157,7 +173,7 @@ HANDLE CreateSemaphoreW(WINPR_ATTR_UNUSED LPSECURITY_ATTRIBUTES lpSemaphoreAttri
 			close(semaphore->pipe_fd[0]);
 			close(semaphore->pipe_fd[1]);
 			free(semaphore);
-			return NULL;
+			return nullptr;
 		}
 
 		lInitialCount--;
@@ -170,7 +186,7 @@ HANDLE CreateSemaphoreW(WINPR_ATTR_UNUSED LPSECURITY_ATTRIBUTES lpSemaphoreAttri
 	{
 		WLog_ERR(TAG, "failed to allocate semaphore memory");
 		free(semaphore);
-		return NULL;
+		return nullptr;
 	}
 
 #if defined __APPLE__
@@ -184,7 +200,7 @@ HANDLE CreateSemaphoreW(WINPR_ATTR_UNUSED LPSECURITY_ATTRIBUTES lpSemaphoreAttri
 		WLog_ERR(TAG, "failed to create semaphore");
 		free(semaphore->sem);
 		free(semaphore);
-		return NULL;
+		return nullptr;
 	}
 
 #endif
@@ -196,29 +212,29 @@ HANDLE CreateSemaphoreW(WINPR_ATTR_UNUSED LPSECURITY_ATTRIBUTES lpSemaphoreAttri
 HANDLE CreateSemaphoreA(LPSECURITY_ATTRIBUTES lpSemaphoreAttributes, LONG lInitialCount,
                         LONG lMaximumCount, WINPR_ATTR_UNUSED LPCSTR lpName)
 {
-	return CreateSemaphoreW(lpSemaphoreAttributes, lInitialCount, lMaximumCount, NULL);
+	return CreateSemaphoreW(lpSemaphoreAttributes, lInitialCount, lMaximumCount, nullptr);
 }
 
 HANDLE OpenSemaphoreW(WINPR_ATTR_UNUSED DWORD dwDesiredAccess,
                       WINPR_ATTR_UNUSED BOOL bInheritHandle, WINPR_ATTR_UNUSED LPCWSTR lpName)
 {
 	WLog_ERR(TAG, "not implemented");
-	return NULL;
+	return nullptr;
 }
 
 HANDLE OpenSemaphoreA(WINPR_ATTR_UNUSED DWORD dwDesiredAccess,
                       WINPR_ATTR_UNUSED BOOL bInheritHandle, WINPR_ATTR_UNUSED LPCSTR lpName)
 {
 	WLog_ERR(TAG, "not implemented");
-	return NULL;
+	return nullptr;
 }
 
 BOOL ReleaseSemaphore(HANDLE hSemaphore, LONG lReleaseCount,
                       WINPR_ATTR_UNUSED LPLONG lpPreviousCount)
 {
 	ULONG Type = 0;
-	WINPR_HANDLE* Object = NULL;
-	WINPR_SEMAPHORE* semaphore = NULL;
+	WINPR_HANDLE* Object = nullptr;
+	WINPR_SEMAPHORE* semaphore = nullptr;
 
 	if (!winpr_Handle_GetInfo(hSemaphore, &Type, &Object))
 		return FALSE;

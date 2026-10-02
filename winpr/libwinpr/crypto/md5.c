@@ -37,6 +37,8 @@
 
 #include <string.h>
 
+#include <winpr/cast.h>
+
 #include "md5.h"
 
 /*
@@ -90,8 +92,8 @@ static inline winpr_MD5_u32plus I(winpr_MD5_u32plus x, winpr_MD5_u32plus y, winp
  * link-time optimizations.  For the time being, keeping these MD5 routines in
  * their own translation unit avoids the problem.
  */
-#if defined(__i386__) || defined(__x86_64__) || defined(__vax__)
-#define SET(n) (*(const winpr_MD5_u32plus*)&ptr[4ULL * (n)])
+#if defined(WINPR_ARCH_SUPPORTED)
+#define SET(n) (*(WINPR_PACKED_ALIGN_CAST(const winpr_MD5_u32plus*, &ptr[4ULL * (n)])))
 #define GET(n) SET(n)
 #else
 #define SET(n)                                                          \
@@ -106,7 +108,7 @@ static inline winpr_MD5_u32plus I(winpr_MD5_u32plus x, winpr_MD5_u32plus y, winp
  * This processes one or more 64-byte data blocks, but does NOT update the bit
  * counters.  There are no alignment requirements.
  */
-static const void* body(WINPR_MD5_CTX* ctx, const void* data, unsigned long size)
+static const void* body(WINPR_MD5_CTX* ctx, const void* data, size_t size)
 {
 	const unsigned char* ptr = (const unsigned char*)data;
 
@@ -221,18 +223,18 @@ void winpr_MD5_Init(WINPR_MD5_CTX* ctx)
 	ctx->hi = 0;
 }
 
-void winpr_MD5_Update(WINPR_MD5_CTX* ctx, const void* data, unsigned long size)
+void winpr_MD5_Update(WINPR_MD5_CTX* ctx, const void* data, size_t size)
 {
 	winpr_MD5_u32plus saved_lo = ctx->lo;
 	if ((ctx->lo = (saved_lo + size) & 0x1fffffff) < saved_lo)
 		ctx->hi++;
-	ctx->hi += size >> 29;
+	ctx->hi += (winpr_MD5_u32plus)((size >> 29) & 0xffffffff);
 
-	unsigned long used = saved_lo & 0x3f;
+	size_t used = saved_lo & 0x3f;
 
 	if (used)
 	{
-		unsigned long available = 64 - used;
+		size_t available = 64 - used;
 
 		if (size < available)
 		{
@@ -248,7 +250,7 @@ void winpr_MD5_Update(WINPR_MD5_CTX* ctx, const void* data, unsigned long size)
 
 	if (size >= 64)
 	{
-		data = body(ctx, data, size & ~(unsigned long)0x3f);
+		data = body(ctx, data, size & ~(size_t)0x3f);
 		size &= 0x3f;
 	}
 
@@ -265,11 +267,11 @@ static inline void mdOUT(unsigned char* dst, winpr_MD5_u32plus src)
 
 void winpr_MD5_Final(unsigned char* result, WINPR_MD5_CTX* ctx)
 {
-	unsigned long used = ctx->lo & 0x3f;
+	size_t used = ctx->lo & 0x3f;
 
 	ctx->buffer[used++] = 0x80;
 
-	unsigned long available = 64 - used;
+	size_t available = 64 - used;
 
 	if (available < 8)
 	{

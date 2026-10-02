@@ -44,6 +44,7 @@
 
 #define TAG FREERDP_TAG("core.gateway.rpc")
 
+WINPR_ATTR_NODISCARD
 static const char* rpc_client_state_str(RPC_CLIENT_STATE state)
 {
 	// NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -88,33 +89,15 @@ static const char* rpc_client_state_str(RPC_CLIENT_STATE state)
 	return str;
 }
 
-static void rpc_pdu_reset(RPC_PDU* pdu)
+WINPR_ATTR_NODISCARD
+static BOOL rpc_pdu_reset(RPC_PDU* pdu)
 {
+	WINPR_ASSERT(pdu);
 	pdu->Type = 0;
 	pdu->Flags = 0;
 	pdu->CallId = 0;
-	Stream_SetPosition(pdu->s, 0);
-	Stream_SetLength(pdu->s, 0);
-}
-
-static RPC_PDU* rpc_pdu_new(void)
-{
-	RPC_PDU* pdu = NULL;
-	pdu = (RPC_PDU*)malloc(sizeof(RPC_PDU));
-
-	if (!pdu)
-		return NULL;
-
-	pdu->s = Stream_New(NULL, 4096);
-
-	if (!pdu->s)
-	{
-		free(pdu);
-		return NULL;
-	}
-
-	rpc_pdu_reset(pdu);
-	return pdu;
+	Stream_ResetPosition(pdu->s);
+	return Stream_SetLength(pdu->s, 0);
 }
 
 static void rpc_pdu_free(RPC_PDU* pdu)
@@ -126,6 +109,30 @@ static void rpc_pdu_free(RPC_PDU* pdu)
 	free(pdu);
 }
 
+WINPR_ATTR_MALLOC(rpc_pdu_free, 1)
+static RPC_PDU* rpc_pdu_new(void)
+{
+	RPC_PDU* pdu = (RPC_PDU*)calloc(1, sizeof(RPC_PDU));
+
+	if (!pdu)
+		return nullptr;
+
+	pdu->s = Stream_New(nullptr, 4096);
+
+	if (!pdu->s)
+		goto fail;
+
+	if (!rpc_pdu_reset(pdu))
+		goto fail;
+
+	return pdu;
+
+fail:
+	rpc_pdu_free(pdu);
+	return nullptr;
+}
+
+WINPR_ATTR_NODISCARD
 static int rpc_client_receive_pipe_write(RpcClient* client, const BYTE* buffer, size_t length)
 {
 	int status = 0;
@@ -185,10 +192,11 @@ static int rpc_client_transition_to_state(rdpRpc* rpc, RPC_CLIENT_STATE state)
 	return status;
 }
 
+WINPR_ATTR_NODISCARD
 static int rpc_client_recv_pdu_int(rdpRpc* rpc, RPC_PDU* pdu)
 {
 	int status = -1;
-	RtsPduSignature found = { 0 };
+	RtsPduSignature found = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(pdu);
@@ -198,7 +206,8 @@ static int rpc_client_recv_pdu_int(rdpRpc* rpc, RPC_PDU* pdu)
 	WLog_Print(rpc->log, WLOG_TRACE, "client state %s, vc state %s",
 	           rpc_client_state_str(rpc->State), rpc_vc_state_str(rpc->VirtualConnection->State));
 
-	const BOOL rc = rts_match_pdu_signature_ex(&RTS_PDU_PING_SIGNATURE, pdu->s, NULL, &found, TRUE);
+	const BOOL rc =
+	    rts_match_pdu_signature_ex(&RTS_PDU_PING_SIGNATURE, pdu->s, nullptr, &found, TRUE);
 	rts_print_pdu_signature(rpc->log, WLOG_TRACE, &found);
 	if (rc)
 		return rts_recv_ping_pdu(rpc, pdu->s);
@@ -339,13 +348,14 @@ static int rpc_client_recv_pdu_int(rdpRpc* rpc, RPC_PDU* pdu)
 	return status;
 }
 
+WINPR_ATTR_NODISCARD
 static int rpc_client_recv_pdu(rdpRpc* rpc, RPC_PDU* pdu)
 {
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(pdu);
 
 	Stream_SealLength(pdu->s);
-	Stream_SetPosition(pdu->s, 0);
+	Stream_ResetPosition(pdu->s);
 
 	const size_t before = Stream_GetRemainingLength(pdu->s);
 	WLog_Print(rpc->log, WLOG_TRACE, "RPC PDU parsing %" PRIuz " bytes", before);
@@ -363,24 +373,24 @@ static int rpc_client_recv_pdu(rdpRpc* rpc, RPC_PDU* pdu)
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 {
 	int rc = -1;
-	RPC_PDU* pdu = NULL;
 	size_t StubOffset = 0;
 	size_t StubLength = 0;
-	RpcClientCall* call = NULL;
-	rpcconn_hdr_t header = { 0 };
+	RpcClientCall* call = nullptr;
+	rpcconn_hdr_t header = WINPR_C_ARRAY_INIT;
 
 	WINPR_ASSERT(rpc);
 	WINPR_ASSERT(rpc->client);
 	WINPR_ASSERT(fragment);
 
-	pdu = rpc->client->pdu;
+	RPC_PDU* pdu = rpc->client->pdu;
 	WINPR_ASSERT(pdu);
 
 	Stream_SealLength(fragment);
-	Stream_SetPosition(fragment, 0);
+	Stream_ResetPosition(fragment);
 
 	if (!rts_read_pdu_header(fragment, &header))
 		goto fail;
@@ -418,15 +428,15 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 
 				if (Stream_Length(fragment) < StubOffset + 4)
 					goto fail;
-				Stream_SetPosition(fragment, StubOffset);
+				if (!Stream_SetPosition(fragment, StubOffset))
+					goto fail;
 				Stream_Read_UINT32(fragment, rpc->result);
 
 				utils_abort_connect(context->rdp);
 				tsg_set_state(tsg, TSG_STATE_TUNNEL_CLOSE_PENDING);
 				EventArgsInit(&e, "freerdp");
 				e.code = 0;
-				PubSub_OnTerminate(context->rdp->pubSub, context, &e);
-				rc = 0;
+				rc = PubSub_OnTerminate(context->rdp->pubSub, context, &e) >= 0 ? 0 : -1;
 				goto success;
 			}
 
@@ -458,13 +468,15 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 		{
 			const rpcconn_response_hdr_t* response =
 			    (const rpcconn_response_hdr_t*)&header.response;
-			if (!Stream_EnsureCapacity(pdu->s, response->alloc_hint))
+			if (!Stream_EnsureRemainingCapacity(pdu->s, StubLength))
 				goto fail;
 
 			if (Stream_Length(fragment) < StubOffset + StubLength)
 				goto fail;
 
-			Stream_SetPosition(fragment, StubOffset);
+			if (!Stream_SetPosition(fragment, StubOffset))
+				goto fail;
+
 			Stream_Write(pdu->s, Stream_ConstPointer(fragment), StubLength);
 			rpc->StubFragCount++;
 
@@ -476,7 +488,8 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 
 				if (rpc_client_recv_pdu(rpc, pdu) < 0)
 					goto fail;
-				rpc_pdu_reset(pdu);
+				if (!rpc_pdu_reset(pdu))
+					goto fail;
 				rpc->StubFragCount = 0;
 				rpc->StubCallId = 0;
 			}
@@ -486,8 +499,11 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 			const rpcconn_response_hdr_t* response = &header.response;
 			if (Stream_Length(fragment) < StubOffset + StubLength)
 				goto fail;
-			Stream_SetPosition(fragment, StubOffset);
-			rpc_client_receive_pipe_write(rpc->client, Stream_ConstPointer(fragment), StubLength);
+			if (!Stream_SetPosition(fragment, StubOffset))
+				goto fail;
+			if (rpc_client_receive_pipe_write(rpc->client, Stream_ConstPointer(fragment),
+			                                  StubLength) < 0)
+				goto fail;
 			rpc->StubFragCount++;
 
 			if (response->alloc_hint == StubLength)
@@ -508,7 +524,7 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 			pdu->CallId = header.common.call_id;
 
 			const size_t len = Stream_Length(fragment);
-			if (!Stream_EnsureCapacity(pdu->s, len))
+			if (!Stream_EnsureRemainingCapacity(pdu->s, len))
 				goto fail;
 
 			Stream_Write(pdu->s, Stream_Buffer(fragment), len);
@@ -516,7 +532,8 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 			if (rpc_client_recv_pdu(rpc, pdu) < 0)
 				goto fail;
 
-			rpc_pdu_reset(pdu);
+			if (!rpc_pdu_reset(pdu))
+				goto fail;
 		}
 		else
 		{
@@ -534,7 +551,7 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 		pdu->CallId = header.common.call_id;
 
 		const size_t len = Stream_Length(fragment);
-		if (!Stream_EnsureCapacity(pdu->s, len))
+		if (!Stream_EnsureRemainingCapacity(pdu->s, len))
 			goto fail;
 
 		Stream_Write(pdu->s, Stream_Buffer(fragment), len);
@@ -542,7 +559,8 @@ static int rpc_client_recv_fragment(rdpRpc* rpc, wStream* fragment)
 		if (rpc_client_recv_pdu(rpc, pdu) < 0)
 			goto fail;
 
-		rpc_pdu_reset(pdu);
+		if (!rpc_pdu_reset(pdu))
+			goto fail;
 		goto success;
 	}
 	else if (header.common.ptype == PTYPE_FAULT)
@@ -565,13 +583,14 @@ fail:
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 {
 	SSIZE_T status = -1;
-	HttpResponse* response = NULL;
-	RpcInChannel* inChannel = NULL;
-	RpcOutChannel* outChannel = NULL;
-	HANDLE outChannelEvent = NULL;
+	HttpResponse* response = nullptr;
+	RpcInChannel* inChannel = nullptr;
+	RpcOutChannel* outChannel = nullptr;
+	HANDLE outChannelEvent = nullptr;
 	RpcVirtualConnection* connection = rpc->VirtualConnection;
 	inChannel = connection->DefaultInChannel;
 	outChannel = connection->DefaultOutChannel;
@@ -673,7 +692,7 @@ static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 		while (1)
 		{
 			size_t pos = 0;
-			rpcconn_common_hdr_t header = { 0 };
+			rpcconn_common_hdr_t header = WINPR_C_ARRAY_INIT;
 
 			while (Stream_GetPosition(fragment) < RPC_COMMON_FIELDS_LENGTH)
 			{
@@ -688,13 +707,17 @@ static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 			}
 
 			pos = Stream_GetPosition(fragment);
-			Stream_SetPosition(fragment, 0);
+			Stream_ResetPosition(fragment);
 
 			/* Ignore errors, the PDU might not be complete. */
-			rts_read_common_pdu_header(fragment, &header, TRUE);
-			Stream_SetPosition(fragment, pos);
+			const rts_pdu_status_t rc = rts_read_common_pdu_header(fragment, &header, TRUE);
+			if (rc == RTS_PDU_FAIL)
+				return -1;
 
-			if (header.frag_length > rpc->max_recv_frag)
+			if (!Stream_SetPosition(fragment, pos))
+				return -1;
+
+			if (header.frag_length >= rpc->max_recv_frag)
 			{
 				WLog_ERR(TAG,
 				         "rpc_client_recv: invalid fragment size: %" PRIu16 " (max: %" PRIu16 ")",
@@ -732,7 +755,7 @@ static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 				{
 					rpc_channel_free(&connection->DefaultOutChannel->common);
 					connection->DefaultOutChannel = connection->NonDefaultOutChannel;
-					connection->NonDefaultOutChannel = NULL;
+					connection->NonDefaultOutChannel = nullptr;
 					rpc_out_channel_transition_to_state(connection->DefaultOutChannel,
 					                                    CLIENT_OUT_CHANNEL_STATE_OPENED);
 					rpc_virtual_connection_transition_to_state(
@@ -740,7 +763,7 @@ static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 					return 0;
 				}
 
-				Stream_SetPosition(fragment, 0);
+				Stream_ResetPosition(fragment);
 			}
 		}
 	}
@@ -748,12 +771,13 @@ static SSIZE_T rpc_client_default_out_channel_recv(rdpRpc* rpc)
 	return status;
 }
 
+WINPR_ATTR_NODISCARD
 static SSIZE_T rpc_client_nondefault_out_channel_recv(rdpRpc* rpc)
 {
 	SSIZE_T status = -1;
-	HttpResponse* response = NULL;
-	RpcOutChannel* nextOutChannel = NULL;
-	HANDLE nextOutChannelEvent = NULL;
+	HttpResponse* response = nullptr;
+	RpcOutChannel* nextOutChannel = nullptr;
+	HANDLE nextOutChannelEvent = nullptr;
 	nextOutChannel = rpc->VirtualConnection->NonDefaultOutChannel;
 	BIO_get_event(nextOutChannel->common.tls->bio, &nextOutChannelEvent);
 
@@ -846,10 +870,10 @@ int rpc_client_out_channel_recv(rdpRpc* rpc)
 int rpc_client_in_channel_recv(rdpRpc* rpc)
 {
 	int status = 1;
-	HttpResponse* response = NULL;
-	RpcInChannel* inChannel = NULL;
-	RpcOutChannel* outChannel = NULL;
-	HANDLE InChannelEvent = NULL;
+	HttpResponse* response = nullptr;
+	RpcInChannel* inChannel = nullptr;
+	RpcOutChannel* outChannel = nullptr;
+	HANDLE InChannelEvent = nullptr;
 	RpcVirtualConnection* connection = rpc->VirtualConnection;
 	inChannel = connection->DefaultInChannel;
 	outChannel = connection->DefaultOutChannel;
@@ -932,10 +956,10 @@ int rpc_client_in_channel_recv(rdpRpc* rpc)
 
 RpcClientCall* rpc_client_call_find_by_id(RpcClient* client, UINT32 CallId)
 {
-	RpcClientCall* clientCall = NULL;
+	RpcClientCall* clientCall = nullptr;
 
 	if (!client)
-		return NULL;
+		return nullptr;
 
 	ArrayList_Lock(client->ClientCallList);
 	const size_t count = ArrayList_Count(client->ClientCallList);
@@ -954,11 +978,11 @@ RpcClientCall* rpc_client_call_find_by_id(RpcClient* client, UINT32 CallId)
 
 RpcClientCall* rpc_client_call_new(UINT32 CallId, UINT32 OpNum)
 {
-	RpcClientCall* clientCall = NULL;
+	RpcClientCall* clientCall = nullptr;
 	clientCall = (RpcClientCall*)calloc(1, sizeof(RpcClientCall));
 
 	if (!clientCall)
-		return NULL;
+		return nullptr;
 
 	clientCall->CallId = CallId;
 	clientCall->OpNum = OpNum;
@@ -978,19 +1002,19 @@ static void rpc_array_client_call_free(void* call)
 
 int rpc_in_channel_send_pdu(RpcInChannel* inChannel, const BYTE* buffer, size_t length)
 {
-	SSIZE_T status = 0;
-	RpcClientCall* clientCall = NULL;
-	wStream s;
-	rpcconn_common_hdr_t header = { 0 };
+	RpcClientCall* clientCall = nullptr;
+	wStream s = Stream_Init();
+	rpcconn_common_hdr_t header = WINPR_C_ARRAY_INIT;
 
-	status = rpc_channel_write(&inChannel->common, buffer, length);
+	SSIZE_T status = rpc_channel_write(&inChannel->common, buffer, length);
 
 	if (status <= 0)
 		return -1;
 
 	Stream_StaticConstInit(&s, buffer, length);
-	if (!rts_read_common_pdu_header(&s, &header, FALSE))
-		return -1;
+	const rts_pdu_status_t rc = rts_read_common_pdu_header(&s, &header, FALSE);
+	if (rc != RTS_PDU_VALID)
+		return FALSE;
 
 	clientCall = rpc_client_call_find_by_id(inChannel->common.client, header.call_id);
 	if (!clientCall)
@@ -1020,15 +1044,15 @@ int rpc_in_channel_send_pdu(RpcInChannel* inChannel, const BYTE* buffer, size_t 
 BOOL rpc_client_write_call(rdpRpc* rpc, wStream* s, UINT16 opnum)
 {
 	size_t offset = 0;
-	BYTE* buffer = NULL;
+	BYTE* buffer = nullptr;
 	size_t stub_data_pad = 0;
 	SecBuffer plaintext;
-	SecBuffer ciphertext = { 0 };
-	RpcClientCall* clientCall = NULL;
-	rdpCredsspAuth* auth = NULL;
-	rpcconn_request_hdr_t request_pdu = { 0 };
-	RpcVirtualConnection* connection = NULL;
-	RpcInChannel* inChannel = NULL;
+	SecBuffer ciphertext = WINPR_C_ARRAY_INIT;
+	RpcClientCall* clientCall = nullptr;
+	rdpCredsspAuth* auth = nullptr;
+	rpcconn_request_hdr_t request_pdu = WINPR_C_ARRAY_INIT;
+	RpcVirtualConnection* connection = nullptr;
+	RpcInChannel* inChannel = nullptr;
 	BOOL rc = FALSE;
 
 	if (!s)
@@ -1055,63 +1079,70 @@ BOOL rpc_client_write_call(rdpRpc* rpc, wStream* s, UINT16 opnum)
 		goto fail;
 
 	Stream_SealLength(s);
-	const size_t length = Stream_Length(s);
-	if (length > UINT32_MAX)
-		goto fail;
 
-	const size_t asize = credssp_auth_trailer_size(auth);
-
-	request_pdu.header = rpc_pdu_header_init(rpc);
-	request_pdu.header.ptype = PTYPE_REQUEST;
-	request_pdu.header.pfc_flags = PFC_FIRST_FRAG | PFC_LAST_FRAG;
-	request_pdu.header.auth_length = (UINT16)asize;
-	request_pdu.header.call_id = rpc->CallId++;
-	request_pdu.alloc_hint = (UINT32)length;
-	request_pdu.p_cont_id = 0x0000;
-	request_pdu.opnum = opnum;
-	clientCall = rpc_client_call_new(request_pdu.header.call_id, request_pdu.opnum);
-
-	if (!clientCall)
-		goto fail;
-
-	if (!ArrayList_Append(rpc->client->ClientCallList, clientCall))
 	{
-		rpc_client_call_free(clientCall);
-		goto fail;
+		const size_t length = Stream_Length(s);
+		if (length > UINT32_MAX)
+			goto fail;
+
+		{
+			const size_t asize = credssp_auth_trailer_size(auth);
+			request_pdu.header = rpc_pdu_header_init(rpc);
+			request_pdu.header.ptype = PTYPE_REQUEST;
+			request_pdu.header.pfc_flags = PFC_FIRST_FRAG | PFC_LAST_FRAG;
+			request_pdu.header.auth_length = (UINT16)asize;
+		}
+		request_pdu.header.call_id = rpc->CallId++;
+		request_pdu.alloc_hint = (UINT32)length;
+		request_pdu.p_cont_id = 0x0000;
+		request_pdu.opnum = opnum;
+		clientCall = rpc_client_call_new(request_pdu.header.call_id, request_pdu.opnum);
+
+		if (!clientCall)
+			goto fail;
+
+		if (!ArrayList_Append(rpc->client->ClientCallList, clientCall))
+		{
+			rpc_client_call_free(clientCall);
+			goto fail;
+		}
+
+		// NOLINTNEXTLINE(clang-analyzer-unix.Malloc): ArrayList_Append takes ownership
+		if (request_pdu.opnum == TsProxySetupReceivePipeOpnum)
+			rpc->PipeCallId = request_pdu.header.call_id;
+
+		request_pdu.stub_data = Stream_Buffer(s);
+		offset = 24;
+		stub_data_pad = rpc_offset_align(&offset, 8);
+		offset += length;
+
+		{
+			const size_t alg = rpc_offset_align(&offset, 4);
+			WINPR_ASSERT(alg <= UINT8_MAX);
+			request_pdu.auth_verifier.auth_pad_length = (UINT8)alg;
+		}
+		request_pdu.auth_verifier.auth_type =
+		    rpc_auth_pkg_to_security_provider(credssp_auth_pkg_name(rpc->auth));
+		request_pdu.auth_verifier.auth_level = RPC_C_AUTHN_LEVEL_PKT_INTEGRITY;
+		request_pdu.auth_verifier.auth_reserved = 0x00;
+		request_pdu.auth_verifier.auth_context_id = 0x00000000;
+		offset += (8 + request_pdu.header.auth_length);
+
+		if (offset > UINT16_MAX)
+			goto fail;
+		request_pdu.header.frag_length = (UINT16)offset;
+		buffer = (BYTE*)calloc(1, request_pdu.header.frag_length);
+
+		if (!buffer)
+			goto fail;
+
+		CopyMemory(buffer, &request_pdu, 24);
+		offset = 24;
+		rpc_offset_pad(&offset, stub_data_pad);
+		CopyMemory(&buffer[offset], request_pdu.stub_data, length);
+		offset += length;
 	}
 
-	// NOLINTNEXTLINE(clang-analyzer-unix.Malloc): ArrayList_Append takes ownership of clientCall
-	if (request_pdu.opnum == TsProxySetupReceivePipeOpnum)
-		rpc->PipeCallId = request_pdu.header.call_id;
-
-	request_pdu.stub_data = Stream_Buffer(s);
-	offset = 24;
-	stub_data_pad = rpc_offset_align(&offset, 8);
-	offset += length;
-
-	const size_t alg = rpc_offset_align(&offset, 4);
-	WINPR_ASSERT(alg <= UINT8_MAX);
-	request_pdu.auth_verifier.auth_pad_length = (UINT8)alg;
-	request_pdu.auth_verifier.auth_type =
-	    rpc_auth_pkg_to_security_provider(credssp_auth_pkg_name(rpc->auth));
-	request_pdu.auth_verifier.auth_level = RPC_C_AUTHN_LEVEL_PKT_INTEGRITY;
-	request_pdu.auth_verifier.auth_reserved = 0x00;
-	request_pdu.auth_verifier.auth_context_id = 0x00000000;
-	offset += (8 + request_pdu.header.auth_length);
-
-	if (offset > UINT16_MAX)
-		goto fail;
-	request_pdu.header.frag_length = (UINT16)offset;
-	buffer = (BYTE*)calloc(1, request_pdu.header.frag_length);
-
-	if (!buffer)
-		goto fail;
-
-	CopyMemory(buffer, &request_pdu, 24);
-	offset = 24;
-	rpc_offset_pad(&offset, stub_data_pad);
-	CopyMemory(&buffer[offset], request_pdu.stub_data, length);
-	offset += length;
 	rpc_offset_pad(&offset, request_pdu.auth_verifier.auth_pad_length);
 	CopyMemory(&buffer[offset], &request_pdu.auth_verifier.auth_type, 8);
 	offset += 8;
@@ -1123,18 +1154,20 @@ BOOL rpc_client_write_call(rdpRpc* rpc, wStream* s, UINT16 opnum)
 	plaintext.cbBuffer = (UINT32)offset;
 	plaintext.BufferType = SECBUFFER_READONLY;
 
-	size_t size = 0;
-	if (!credssp_auth_encrypt(auth, &plaintext, &ciphertext, &size, rpc->SendSeqNum++))
-		goto fail;
-
-	if (offset + size > request_pdu.header.frag_length)
 	{
-		sspi_SecBufferFree(&ciphertext);
-		goto fail;
-	}
+		size_t size = 0;
+		if (!credssp_auth_encrypt(auth, &plaintext, &ciphertext, &size, rpc->SendSeqNum++))
+			goto fail;
 
-	CopyMemory(&buffer[offset], ciphertext.pvBuffer, size);
-	offset += size;
+		if (offset + size > request_pdu.header.frag_length)
+		{
+			sspi_SecBufferFree(&ciphertext);
+			goto fail;
+		}
+
+		CopyMemory(&buffer[offset], ciphertext.pvBuffer, size);
+		offset += size;
+	}
 
 	sspi_SecBufferFree(&ciphertext);
 
@@ -1148,10 +1181,11 @@ fail:
 	return rc;
 }
 
+WINPR_ATTR_NODISCARD
 static BOOL rpc_client_resolve_gateway(rdpSettings* settings, char** host, UINT16* port,
                                        BOOL* isProxy)
 {
-	struct addrinfo* result = NULL;
+	struct addrinfo* result = nullptr;
 
 	if (!settings || !host || !port || !isProxy)
 		return FALSE;
@@ -1167,8 +1201,8 @@ static BOOL rpc_client_resolve_gateway(rdpSettings* settings, char** host, UINT1
 		if (!result)
 			return FALSE;
 
-		*host =
-		    freerdp_tcp_address_to_string((const struct sockaddr_storage*)result->ai_addr, NULL);
+		*host = freerdp_tcp_address_to_string(
+		    WINPR_PACKED_ALIGN_CAST(const struct sockaddr_storage*, result->ai_addr), nullptr);
 		freeaddrinfo(result);
 		return TRUE;
 	}
@@ -1176,11 +1210,11 @@ static BOOL rpc_client_resolve_gateway(rdpSettings* settings, char** host, UINT1
 
 RpcClient* rpc_client_new(rdpContext* context, UINT32 max_recv_frag)
 {
-	wObject* obj = NULL;
+	wObject* obj = nullptr;
 	RpcClient* client = (RpcClient*)calloc(1, sizeof(RpcClient));
 
 	if (!client)
-		return NULL;
+		return nullptr;
 
 	if (!rpc_client_resolve_gateway(context->settings, &client->host, &client->port,
 	                                &client->isProxy))
@@ -1196,12 +1230,12 @@ RpcClient* rpc_client_new(rdpContext* context, UINT32 max_recv_frag)
 	if (!client->pdu)
 		goto fail;
 
-	client->ReceiveFragment = Stream_New(NULL, max_recv_frag);
+	client->ReceiveFragment = Stream_New(nullptr, max_recv_frag);
 
 	if (!client->ReceiveFragment)
 		goto fail;
 
-	client->PipeEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	client->PipeEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
 
 	if (!client->PipeEvent)
 		goto fail;
@@ -1225,7 +1259,7 @@ fail:
 	WINPR_PRAGMA_DIAG_IGNORED_MISMATCHED_DEALLOC
 	rpc_client_free(client);
 	WINPR_PRAGMA_DIAG_POP
-	return NULL;
+	return nullptr;
 }
 
 void rpc_client_free(RpcClient* client)

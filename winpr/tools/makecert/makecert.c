@@ -26,6 +26,7 @@
 #include <winpr/cmdline.h>
 #include <winpr/sysinfo.h>
 #include <winpr/crypto.h>
+#include <winpr/print.h>
 
 #ifdef WITH_OPENSSL
 #include <openssl/crypto.h>
@@ -39,6 +40,10 @@
 #endif
 
 #include <winpr/tools/makecert.h>
+
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 struct S_MAKECERT_CONTEXT
 {
@@ -69,21 +74,28 @@ struct S_MAKECERT_CONTEXT
 	int duration_months;
 };
 
+WINPR_ATTR_NODISCARD
+static BOOL utils_set_umask(void)
+{
+#if !defined(_WIN32)
+	(void)umask(S_IRWXG | S_IRWXO);
+#endif
+	return TRUE;
+}
+
+WINPR_ATTR_MALLOC(winpr_zfree, 1)
 static char* makecert_read_str(BIO* bio, size_t* pOffset)
 {
 	int status = -1;
 	size_t offset = 0;
 	size_t length = 0;
-	char* x509_str = NULL;
+	char* x509_str = nullptr;
 
 	while (offset >= length)
 	{
-		size_t new_len = 0;
 		size_t readBytes = 0;
-		char* new_str = NULL;
-		new_len = length * 2;
-		if (new_len == 0)
-			new_len = 2048;
+		char* new_str = nullptr;
+		size_t new_len = length + 2048ull;
 
 		if (new_len > INT_MAX)
 		{
@@ -119,7 +131,7 @@ static char* makecert_read_str(BIO* bio, size_t* pOffset)
 		free(x509_str);
 		if (pOffset)
 			*pOffset = 0;
-		return NULL;
+		return nullptr;
 	}
 
 	x509_str[offset] = '\0';
@@ -130,8 +142,8 @@ static char* makecert_read_str(BIO* bio, size_t* pOffset)
 
 static int makecert_print_command_line_help(COMMAND_LINE_ARGUMENT_A* args, int argc, char** argv)
 {
-	char* str = NULL;
-	const COMMAND_LINE_ARGUMENT_A* arg = NULL;
+	char* str = nullptr;
+	const COMMAND_LINE_ARGUMENT_A* arg = nullptr;
 
 	if (!argv || (argc < 1))
 		return -1;
@@ -172,22 +184,23 @@ static int makecert_print_command_line_help(COMMAND_LINE_ARGUMENT_A* args, int a
 
 			printf("\t%s\n", arg->Text);
 		}
-	} while ((arg = CommandLineFindNextArgumentA(arg)) != NULL);
+	} while ((arg = CommandLineFindNextArgumentA(arg)) != nullptr);
 
 	return 1;
 }
 
 #ifdef WITH_OPENSSL
+WINPR_ATTR_NODISCARD
 static int x509_add_ext(X509* cert, int nid, char* value)
 {
 	X509V3_CTX ctx;
-	X509_EXTENSION* ext = NULL;
+	X509_EXTENSION* ext = nullptr;
 
 	if (!cert || !value)
 		return 0;
 
-	X509V3_set_ctx_nodb(&ctx) X509V3_set_ctx(&ctx, cert, cert, NULL, NULL, 0);
-	ext = X509V3_EXT_conf_nid(NULL, &ctx, nid, value);
+	X509V3_set_ctx_nodb(&ctx) X509V3_set_ctx(&ctx, cert, cert, nullptr, nullptr, 0);
+	ext = X509V3_EXT_conf_nid(nullptr, &ctx, nid, value);
 
 	if (!ext)
 		return 0;
@@ -198,54 +211,68 @@ static int x509_add_ext(X509* cert, int nid, char* value)
 }
 #endif
 
-static char* x509_name_parse(char* name, char* txt, size_t* length)
+WINPR_ATTR_NODISCARD
+static const char* x509_name_parse(const char* name, const char* txt, size_t* length)
 {
-	char* p = NULL;
-	char* entry = NULL;
-
 	if (!name || !txt || !length)
-		return NULL;
+		return nullptr;
 
-	p = strstr(name, txt);
+	const char* entry = nullptr;
+	char* fmt = nullptr;
+	size_t fmtlen = 0;
+	(void)winpr_asprintf(&fmt, &fmtlen, "%s=", txt);
+	if (!fmt)
+		goto fail;
+
+	const char* p = strstr(name, fmt);
 
 	if (!p)
-		return NULL;
+		goto fail;
 
-	entry = p + strlen(txt) + 1;
-	p = strchr(entry, '=');
-
-	if (!p)
+	entry = &p[fmtlen];
+	const char* sep1 = strchr(entry, ';');
+	const char* sep2 = strchr(entry, ',');
+	const char* sep3 = strchr(entry, ' ');
+	if (!sep1 && !sep2 && !sep3)
 		*length = strlen(entry);
+	else if (sep1)
+		*length = WINPR_ASSERTING_INT_CAST(size_t, sep1 - entry);
+	else if (sep2)
+		*length = WINPR_ASSERTING_INT_CAST(size_t, sep2 - entry);
 	else
-		*length = (size_t)(p - entry);
+		*length = WINPR_ASSERTING_INT_CAST(size_t, sep3 - entry);
 
+fail:
+	free(fmt);
 	return entry;
 }
 
+WINPR_ATTR_MALLOC(free, 1)
 static char* get_name(COMPUTER_NAME_FORMAT type)
 {
 	DWORD nSize = 0;
 
-	if (GetComputerNameExA(type, NULL, &nSize))
-		return NULL;
+	if (GetComputerNameExA(type, nullptr, &nSize))
+		return nullptr;
 
 	if (GetLastError() != ERROR_MORE_DATA)
-		return NULL;
+		return nullptr;
 
 	char* computerName = calloc(1, nSize);
 
 	if (!computerName)
-		return NULL;
+		return nullptr;
 
 	if (!GetComputerNameExA(type, computerName, &nSize))
 	{
 		free(computerName);
-		return NULL;
+		return nullptr;
 	}
 
 	return computerName;
 }
 
+WINPR_ATTR_MALLOC(free, 1)
 static char* x509_get_default_name(void)
 {
 	char* computerName = get_name(ComputerNamePhysicalDnsFullyQualified);
@@ -254,6 +281,7 @@ static char* x509_get_default_name(void)
 	return computerName;
 }
 
+WINPR_ATTR_NODISCARD
 static int command_line_pre_filter(void* pvctx, int index, int argc, LPSTR* argv)
 {
 	MAKECERT_CONTEXT* context = pvctx;
@@ -276,12 +304,13 @@ static int command_line_pre_filter(void* pvctx, int index, int argc, LPSTR* argv
 	return 0;
 }
 
+WINPR_ATTR_NODISCARD
 static int makecert_context_parse_arguments(MAKECERT_CONTEXT* context,
                                             COMMAND_LINE_ARGUMENT_A* args, int argc, char** argv)
 {
 	int status = 0;
 	DWORD flags = 0;
-	const COMMAND_LINE_ARGUMENT_A* arg = NULL;
+	const COMMAND_LINE_ARGUMENT_A* arg = nullptr;
 
 	if (!context || !argv || (argc < 0))
 		return -1;
@@ -292,8 +321,8 @@ static int makecert_context_parse_arguments(MAKECERT_CONTEXT* context,
 	 */
 	CommandLineClearArgumentsA(args);
 	flags = COMMAND_LINE_SEPARATOR_SPACE | COMMAND_LINE_SIGIL_DASH;
-	status =
-	    CommandLineParseArgumentsA(argc, argv, args, flags, context, command_line_pre_filter, NULL);
+	status = CommandLineParseArgumentsA(argc, argv, args, flags, context, command_line_pre_filter,
+	                                    nullptr);
 
 	if (status & COMMAND_LINE_STATUS_PRINT_HELP)
 	{
@@ -382,7 +411,7 @@ static int makecert_context_parse_arguments(MAKECERT_CONTEXT* context,
 			if (!(arg->Flags & COMMAND_LINE_ARGUMENT_PRESENT))
 				continue;
 
-			val = strtol(arg->Value, NULL, 0);
+			val = strtol(arg->Value, nullptr, 0);
 
 			if ((errno != 0) || (val < 0) || (val > INT32_MAX))
 				return -1;
@@ -396,7 +425,7 @@ static int makecert_context_parse_arguments(MAKECERT_CONTEXT* context,
 			if (!(arg->Flags & COMMAND_LINE_ARGUMENT_PRESENT))
 				continue;
 
-			val = strtol(arg->Value, NULL, 0);
+			val = strtol(arg->Value, nullptr, 0);
 
 			if ((errno != 0) || (val < 0))
 				return -1;
@@ -407,7 +436,7 @@ static int makecert_context_parse_arguments(MAKECERT_CONTEXT* context,
 		{
 		}
 		CommandLineSwitchEnd(arg)
-	} while ((arg = CommandLineFindNextArgumentA(arg)) != NULL);
+	} while ((arg = CommandLineFindNextArgumentA(arg)) != nullptr);
 
 	return 1;
 }
@@ -418,7 +447,7 @@ int makecert_context_set_output_file_name(MAKECERT_CONTEXT* context, const char*
 		return -1;
 
 	free(context->output_file);
-	context->output_file = NULL;
+	context->output_file = nullptr;
 
 	if (name)
 		context->output_file = _strdup(name);
@@ -432,16 +461,14 @@ int makecert_context_set_output_file_name(MAKECERT_CONTEXT* context, const char*
 int makecert_context_output_certificate_file(MAKECERT_CONTEXT* context, const char* path)
 {
 #ifdef WITH_OPENSSL
-	FILE* fp = NULL;
+	FILE* fp = nullptr;
 	int status = 0;
-	size_t length = 0;
 	size_t offset = 0;
-	char* filename = NULL;
-	char* fullpath = NULL;
-	char* ext = NULL;
+	char* fullpath = nullptr;
+	char* ext = nullptr;
 	int ret = -1;
-	BIO* bio = NULL;
-	char* x509_str = NULL;
+	BIO* bio = nullptr;
+	char* x509_str = nullptr;
 
 	if (!context)
 		return -1;
@@ -457,8 +484,8 @@ int makecert_context_output_certificate_file(MAKECERT_CONTEXT* context, const ch
 	/*
 	 * Output Certificate File
 	 */
-	length = strlen(context->output_file);
-	filename = malloc(length + 8);
+	size_t length = strlen(context->output_file);
+	char* filename = malloc(length + 8);
 
 	if (!filename)
 		return -1;
@@ -490,12 +517,16 @@ int makecert_context_output_certificate_file(MAKECERT_CONTEXT* context, const ch
 		{
 			if (!context->password)
 			{
-				context->password = _strdup("password");
+				BYTE random[32] = WINPR_C_ARRAY_INIT;
+				if (winpr_RAND(random, sizeof(random)) < 0)
+					goto out_fail;
+
+				context->password = winpr_BinToHexString(random, sizeof(random), FALSE);
 
 				if (!context->password)
 					goto out_fail;
 
-				printf("Using default export password \"password\"\n");
+				printf("Using random export password \"%s\"\n", context->password);
 			}
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L || defined(LIBRESSL_VERSION_NUMBER)
@@ -503,12 +534,13 @@ int makecert_context_output_certificate_file(MAKECERT_CONTEXT* context, const ch
 			OpenSSL_add_all_ciphers();
 			OpenSSL_add_all_digests();
 #else
-			OPENSSL_init_crypto(OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS |
-			                        OPENSSL_INIT_LOAD_CONFIG,
-			                    NULL);
+			if (OPENSSL_init_crypto(OPENSSL_INIT_ADD_ALL_CIPHERS | OPENSSL_INIT_ADD_ALL_DIGESTS |
+			                            OPENSSL_INIT_LOAD_CONFIG,
+			                        nullptr) != 1)
+				goto out_fail;
 #endif
 			context->pkcs12 = PKCS12_create(context->password, context->default_name, context->pkey,
-			                                context->x509, NULL, 0, 0, 0, 0, 0);
+			                                context->x509, nullptr, 0, 0, 0, 0, 0);
 
 			if (!context->pkcs12)
 				goto out_fail;
@@ -554,9 +586,9 @@ int makecert_context_output_certificate_file(MAKECERT_CONTEXT* context, const ch
 				goto out_fail;
 
 			free(x509_str);
-			x509_str = NULL;
+			x509_str = nullptr;
 			BIO_free_all(bio);
-			bio = NULL;
+			bio = nullptr;
 
 			if (context->pemFormat)
 			{
@@ -565,7 +597,8 @@ int makecert_context_output_certificate_file(MAKECERT_CONTEXT* context, const ch
 				if (!bio)
 					goto out_fail;
 
-				status = PEM_write_bio_PrivateKey(bio, context->pkey, NULL, NULL, 0, NULL, NULL);
+				status = PEM_write_bio_PrivateKey(bio, context->pkey, nullptr, nullptr, 0, nullptr,
+				                                  nullptr);
 
 				if (status < 0)
 					goto out_fail;
@@ -602,14 +635,14 @@ out_fail:
 int makecert_context_output_private_key_file(MAKECERT_CONTEXT* context, const char* path)
 {
 #ifdef WITH_OPENSSL
-	FILE* fp = NULL;
+	FILE* fp = nullptr;
 	size_t length = 0;
 	size_t offset = 0;
-	char* filename = NULL;
-	char* fullpath = NULL;
+	char* filename = nullptr;
+	char* fullpath = nullptr;
 	int ret = -1;
-	BIO* bio = NULL;
-	char* x509_str = NULL;
+	BIO* bio = nullptr;
+	char* x509_str = nullptr;
 
 	if (!context->crtFormat)
 		return 1;
@@ -651,7 +684,7 @@ int makecert_context_output_private_key_file(MAKECERT_CONTEXT* context, const ch
 	if (!bio)
 		goto out_fail;
 
-	if (!PEM_write_bio_PrivateKey(bio, context->pkey, NULL, NULL, 0, NULL, NULL))
+	if (!PEM_write_bio_PrivateKey(bio, context->pkey, nullptr, nullptr, 0, nullptr, nullptr))
 		goto out_fail;
 
 	x509_str = makecert_read_str(bio, &offset);
@@ -682,6 +715,7 @@ out_fail:
 }
 
 #ifdef WITH_OPENSSL
+WINPR_ATTR_NODISCARD
 static BOOL makecert_create_rsa(EVP_PKEY** ppkey, size_t key_length)
 {
 	BOOL rc = FALSE;
@@ -689,9 +723,9 @@ static BOOL makecert_create_rsa(EVP_PKEY** ppkey, size_t key_length)
 	WINPR_ASSERT(ppkey);
 
 #if !defined(OPENSSL_VERSION_MAJOR) || (OPENSSL_VERSION_MAJOR < 3)
-	RSA* rsa = NULL;
+	RSA* rsa = nullptr;
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER)
-	rsa = RSA_generate_key(key_length, RSA_F4, NULL, NULL);
+	rsa = RSA_generate_key(key_length, RSA_F4, nullptr, nullptr);
 #else
 	{
 		BIGNUM* bn = BN_secure_new();
@@ -708,7 +742,7 @@ static BOOL makecert_create_rsa(EVP_PKEY** ppkey, size_t key_length)
 		}
 
 		BN_set_word(bn, RSA_F4);
-		const int res = RSA_generate_key_ex(rsa, key_length, bn, NULL);
+		const int res = RSA_generate_key_ex(rsa, key_length, bn, nullptr);
 		BN_clear_free(bn);
 
 		if (res != 1)
@@ -723,19 +757,21 @@ static BOOL makecert_create_rsa(EVP_PKEY** ppkey, size_t key_length)
 	}
 	rc = TRUE;
 #else
-	EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_from_name(NULL, "RSA", NULL);
+	EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_from_name(nullptr, "RSA", nullptr);
 	if (!pctx)
 		return FALSE;
 
 	if (EVP_PKEY_keygen_init(pctx) != 1)
 		goto fail;
 
-	WINPR_ASSERT(key_length <= UINT_MAX);
-	unsigned int keylen = (unsigned int)key_length;
-	const OSSL_PARAM params[] = { OSSL_PARAM_construct_uint("bits", &keylen),
-		                          OSSL_PARAM_construct_end() };
-	if (EVP_PKEY_CTX_set_params(pctx, params) != 1)
-		goto fail;
+	{
+		WINPR_ASSERT(key_length <= UINT_MAX);
+		unsigned int keylen = (unsigned int)key_length;
+		const OSSL_PARAM params[] = { OSSL_PARAM_construct_uint("bits", &keylen),
+			                          OSSL_PARAM_construct_end() };
+		if (EVP_PKEY_CTX_set_params(pctx, params) != 1)
+			goto fail;
+	}
 
 	if (EVP_PKEY_generate(pctx, ppkey) != 1)
 		goto fail;
@@ -748,52 +784,74 @@ fail:
 }
 #endif
 
+static int add_entry(X509_NAME* name, const char* value, const char* txt)
+{
+	WINPR_ASSERT(name);
+	WINPR_ASSERT(value);
+	WINPR_ASSERT(txt);
+
+	size_t length = 0;
+	const char* entry = x509_name_parse(value, txt, &length);
+	if (entry)
+	{
+		if (length > INT32_MAX)
+			return -1;
+		const int rc =
+		    X509_NAME_add_entry_by_txt(name, txt, MBSTRING_UTF8, (const unsigned char*)entry,
+		                               WINPR_ASSERTING_INT_CAST(int, length), -1, 0);
+		if (rc != 1)
+			return -1;
+		return 1;
+	}
+	return 0;
+}
+
 int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 {
 	COMMAND_LINE_ARGUMENT_A args[] = {
 		/* Custom Options */
 
-		{ "rdp", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "rdp", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Generate certificate with required options for RDP usage." },
-		{ "silent", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "silent", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Silently generate certificate without verbose output." },
-		{ "live", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "live", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Generate certificate live in memory when used as a library." },
-		{ "format", COMMAND_LINE_VALUE_REQUIRED, "<crt|pem|pfx>", NULL, NULL, -1, NULL,
+		{ "format", COMMAND_LINE_VALUE_REQUIRED, "<crt|pem|pfx>", nullptr, nullptr, -1, nullptr,
 		  "Specify certificate file format" },
-		{ "path", COMMAND_LINE_VALUE_REQUIRED, "<path>", NULL, NULL, -1, NULL,
+		{ "path", COMMAND_LINE_VALUE_REQUIRED, "<path>", nullptr, nullptr, -1, nullptr,
 		  "Specify certificate file output path" },
-		{ "p", COMMAND_LINE_VALUE_REQUIRED, "<password>", NULL, NULL, -1, NULL,
+		{ "p", COMMAND_LINE_VALUE_REQUIRED, "<password>", nullptr, nullptr, -1, nullptr,
 		  "Specify certificate export password" },
 
 		/* Basic Options */
 
-		{ "n", COMMAND_LINE_VALUE_REQUIRED, "<name>", NULL, NULL, -1, NULL,
+		{ "n", COMMAND_LINE_VALUE_REQUIRED, "<name>", nullptr, nullptr, -1, nullptr,
 		  "Specifies the subject's certificate name. This name must conform to the X.500 standard. "
 		  "The simplest method is to specify the name in double quotes, preceded by CN=; for "
 		  "example, "
 		  "-n \"CN=myName\"." },
-		{ "pe", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "pe", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Marks the generated private key as exportable. This allows the private "
 		  "key to "
 		  "be included in the certificate." },
-		{ "sk", COMMAND_LINE_VALUE_REQUIRED, "<keyname>", NULL, NULL, -1, NULL,
+		{ "sk", COMMAND_LINE_VALUE_REQUIRED, "<keyname>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's key container location, which contains the "
 		  "private "
 		  "key. "
 		  "If a key container does not exist, it will be created." },
-		{ "sr", COMMAND_LINE_VALUE_REQUIRED, "<location>", NULL, NULL, -1, NULL,
+		{ "sr", COMMAND_LINE_VALUE_REQUIRED, "<location>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's certificate store location. location can be "
 		  "either "
 		  "currentuser (the default) or localmachine." },
-		{ "ss", COMMAND_LINE_VALUE_REQUIRED, "<store>", NULL, NULL, -1, NULL,
+		{ "ss", COMMAND_LINE_VALUE_REQUIRED, "<store>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's certificate store name that stores the output "
 		  "certificate." },
-		{ "#", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
+		{ "#", COMMAND_LINE_VALUE_REQUIRED, "<number>", nullptr, nullptr, -1, nullptr,
 		  "Specifies a serial number from 1 to 2,147,483,647. The default is a unique value "
 		  "generated "
 		  "by Makecert.exe." },
-		{ "$", COMMAND_LINE_VALUE_REQUIRED, "<authority>", NULL, NULL, -1, NULL,
+		{ "$", COMMAND_LINE_VALUE_REQUIRED, "<authority>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the signing authority of the certificate, which must be set to "
 		  "either commercial "
 		  "(for certificates used by commercial software publishers) or individual (for "
@@ -802,71 +860,71 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 
 		/* Extended Options */
 
-		{ "a", COMMAND_LINE_VALUE_REQUIRED, "<algorithm>", NULL, NULL, -1, NULL,
+		{ "a", COMMAND_LINE_VALUE_REQUIRED, "<algorithm>", nullptr, nullptr, -1, nullptr,
 		  "Specifies the signature algorithm. algorithm must be md5, sha1, sha256 (the default), "
 		  "sha384, or sha512." },
-		{ "b", COMMAND_LINE_VALUE_REQUIRED, "<mm/dd/yyyy>", NULL, NULL, -1, NULL,
+		{ "b", COMMAND_LINE_VALUE_REQUIRED, "<mm/dd/yyyy>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the start of the validity period. Defaults to the current "
 		  "date." },
-		{ "crl", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "crl", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Generates a certificate relocation list (CRL) instead of a certificate." },
-		{ "cy", COMMAND_LINE_VALUE_REQUIRED, "<certType>", NULL, NULL, -1, NULL,
+		{ "cy", COMMAND_LINE_VALUE_REQUIRED, "<certType>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the certificate type. Valid values are end for end-entity and "
 		  "authority for certification authority." },
-		{ "e", COMMAND_LINE_VALUE_REQUIRED, "<mm/dd/yyyy>", NULL, NULL, -1, NULL,
+		{ "e", COMMAND_LINE_VALUE_REQUIRED, "<mm/dd/yyyy>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the end of the validity period. Defaults to 12/31/2039 11:59:59 "
 		  "GMT." },
-		{ "eku", COMMAND_LINE_VALUE_REQUIRED, "<oid[,oid…]>", NULL, NULL, -1, NULL,
+		{ "eku", COMMAND_LINE_VALUE_REQUIRED, "<oid[,oid…]>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Inserts a list of comma-separated, enhanced key usage object identifiers "
 		  "(OIDs) into the certificate." },
-		{ "h", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
+		{ "h", COMMAND_LINE_VALUE_REQUIRED, "<number>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the maximum height of the tree below this certificate." },
-		{ "ic", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
+		{ "ic", COMMAND_LINE_VALUE_REQUIRED, "<file>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's certificate file." },
-		{ "ik", COMMAND_LINE_VALUE_REQUIRED, "<keyName>", NULL, NULL, -1, NULL,
+		{ "ik", COMMAND_LINE_VALUE_REQUIRED, "<keyName>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's key container name." },
-		{ "iky", COMMAND_LINE_VALUE_REQUIRED, "<keyType>", NULL, NULL, -1, NULL,
+		{ "iky", COMMAND_LINE_VALUE_REQUIRED, "<keyType>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's key type, which must be one of the following: "
 		  "signature (which indicates that the key is used for a digital signature), "
 		  "exchange (which indicates that the key is used for key encryption and key exchange), "
 		  "or an integer that represents a provider type. "
 		  "By default, you can pass 1 for an exchange key or 2 for a signature key." },
-		{ "in", COMMAND_LINE_VALUE_REQUIRED, "<name>", NULL, NULL, -1, NULL,
+		{ "in", COMMAND_LINE_VALUE_REQUIRED, "<name>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's certificate common name." },
-		{ "ip", COMMAND_LINE_VALUE_REQUIRED, "<provider>", NULL, NULL, -1, NULL,
+		{ "ip", COMMAND_LINE_VALUE_REQUIRED, "<provider>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's CryptoAPI provider name. For information about the "
 		  "CryptoAPI provider name, see the –sp option." },
-		{ "ir", COMMAND_LINE_VALUE_REQUIRED, "<location>", NULL, NULL, -1, NULL,
+		{ "ir", COMMAND_LINE_VALUE_REQUIRED, "<location>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the location of the issuer's certificate store. location can be "
 		  "either currentuser (the default) or localmachine." },
-		{ "is", COMMAND_LINE_VALUE_REQUIRED, "<store>", NULL, NULL, -1, NULL,
+		{ "is", COMMAND_LINE_VALUE_REQUIRED, "<store>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's certificate store name." },
-		{ "iv", COMMAND_LINE_VALUE_REQUIRED, "<pvkFile>", NULL, NULL, -1, NULL,
+		{ "iv", COMMAND_LINE_VALUE_REQUIRED, "<pvkFile>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's .pvk private key file." },
-		{ "iy", COMMAND_LINE_VALUE_REQUIRED, "<type>", NULL, NULL, -1, NULL,
+		{ "iy", COMMAND_LINE_VALUE_REQUIRED, "<type>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the issuer's CryptoAPI provider type. For information about the "
 		  "CryptoAPI provider type, see the –sy option." },
-		{ "l", COMMAND_LINE_VALUE_REQUIRED, "<link>", NULL, NULL, -1, NULL,
+		{ "l", COMMAND_LINE_VALUE_REQUIRED, "<link>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Links to policy information (for example, to a URL)." },
-		{ "len", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
+		{ "len", COMMAND_LINE_VALUE_REQUIRED, "<number>", nullptr, nullptr, -1, nullptr,
 		  "Specifies the generated key length, in bits." },
-		{ "m", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
+		{ "m", COMMAND_LINE_VALUE_REQUIRED, "<number>", nullptr, nullptr, -1, nullptr,
 		  "Specifies the duration, in months, of the certificate validity period." },
-		{ "y", COMMAND_LINE_VALUE_REQUIRED, "<number>", NULL, NULL, -1, NULL,
+		{ "y", COMMAND_LINE_VALUE_REQUIRED, "<number>", nullptr, nullptr, -1, nullptr,
 		  "Specifies the duration, in years, of the certificate validity period." },
-		{ "nscp", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "nscp", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Includes the Netscape client-authorization extension." },
-		{ "r", COMMAND_LINE_VALUE_FLAG, NULL, NULL, NULL, -1, NULL,
+		{ "r", COMMAND_LINE_VALUE_FLAG, nullptr, nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Creates a self-signed certificate." },
-		{ "sc", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
+		{ "sc", COMMAND_LINE_VALUE_REQUIRED, "<file>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's certificate file." },
-		{ "sky", COMMAND_LINE_VALUE_REQUIRED, "<keyType>", NULL, NULL, -1, NULL,
+		{ "sky", COMMAND_LINE_VALUE_REQUIRED, "<keyType>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's key type, which must be one of the following: "
 		  "signature (which indicates that the key is used for a digital signature), "
 		  "exchange (which indicates that the key is used for key encryption and key exchange), "
 		  "or an integer that represents a provider type. "
 		  "By default, you can pass 1 for an exchange key or 2 for a signature key." },
-		{ "sp", COMMAND_LINE_VALUE_REQUIRED, "<provider>", NULL, NULL, -1, NULL,
+		{ "sp", COMMAND_LINE_VALUE_REQUIRED, "<provider>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's CryptoAPI provider name, which must be defined in "
 		  "the "
 		  "registry subkeys of "
@@ -875,11 +933,11 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 		  "–sy are present, "
 		  "the type of the CryptoAPI provider must correspond to the Type value of the provider's "
 		  "subkey." },
-		{ "sv", COMMAND_LINE_VALUE_REQUIRED, "<pvkFile>", NULL, NULL, -1, NULL,
+		{ "sv", COMMAND_LINE_VALUE_REQUIRED, "<pvkFile>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's .pvk private key file. The file is created if "
 		  "none "
 		  "exists." },
-		{ "sy", COMMAND_LINE_VALUE_REQUIRED, "<type>", NULL, NULL, -1, NULL,
+		{ "sy", COMMAND_LINE_VALUE_REQUIRED, "<type>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the subject's CryptoAPI provider type, which must be defined in "
 		  "the "
 		  "registry subkeys of "
@@ -889,27 +947,23 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 		  "the name of the CryptoAPI provider must correspond to the Name value of the provider "
 		  "type "
 		  "subkey." },
-		{ "tbs", COMMAND_LINE_VALUE_REQUIRED, "<file>", NULL, NULL, -1, NULL,
+		{ "tbs", COMMAND_LINE_VALUE_REQUIRED, "<file>", nullptr, nullptr, -1, nullptr,
 		  "Unsupported - Specifies the certificate or CRL file to be signed." },
 
 		/* Help */
 
-		{ "?", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT_HELP, NULL, NULL, NULL, -1, "help",
-		  "print help" },
-		{ "!", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT_HELP, NULL, NULL, NULL, -1, "help-ext",
-		  "print extended help" },
-		{ NULL, 0, NULL, NULL, NULL, -1, NULL, NULL }
+		{ "?", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT_HELP, nullptr, nullptr, nullptr, -1,
+		  "help", "print help" },
+		{ "!", COMMAND_LINE_VALUE_FLAG | COMMAND_LINE_PRINT_HELP, nullptr, nullptr, nullptr, -1,
+		  "help-ext", "print extended help" },
+		{ nullptr, 0, nullptr, nullptr, nullptr, -1, nullptr, nullptr }
 	};
 #ifdef WITH_OPENSSL
-	size_t length = 0;
-	char* entry = NULL;
-	int key_length = 0;
 	long serial = 0;
-	X509_NAME* name = NULL;
-	const EVP_MD* md = NULL;
-	const COMMAND_LINE_ARGUMENT_A* arg = NULL;
-	int ret = 0;
-	ret = makecert_context_parse_arguments(context, args, argc, argv);
+	X509_NAME* name = nullptr;
+	const EVP_MD* md = nullptr;
+	const COMMAND_LINE_ARGUMENT_A* arg = nullptr;
+	int ret = makecert_context_parse_arguments(context, args, argc, argv);
 
 	if (ret < 1)
 	{
@@ -951,27 +1005,29 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 	if (!context->x509)
 		return -1;
 
-	key_length = 2048;
+	size_t key_length = 2048;
 	arg = CommandLineFindArgumentA(args, "len");
 
 	if (arg->Flags & COMMAND_LINE_VALUE_PRESENT)
 	{
-		unsigned long val = strtoul(arg->Value, NULL, 0);
+		unsigned long val = strtoul(arg->Value, nullptr, 0);
 
 		if ((errno != 0) || (val > INT_MAX))
 			return -1;
-		key_length = (int)val;
+		key_length = val;
 	}
 
-	if (!makecert_create_rsa(&context->pkey, WINPR_ASSERTING_INT_CAST(size_t, key_length)))
+	if (!makecert_create_rsa(&context->pkey, key_length))
 		return -1;
 
-	X509_set_version(context->x509, 2);
+	if (X509_set_version(context->x509, 2) != 1)
+		return -1;
+
 	arg = CommandLineFindArgumentA(args, "#");
 
 	if (arg->Flags & COMMAND_LINE_VALUE_PRESENT)
 	{
-		serial = strtol(arg->Value, NULL, 0);
+		serial = strtol(arg->Value, nullptr, 0);
 
 		if (errno != 0)
 			return -1;
@@ -979,10 +1035,12 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 	else
 		serial = (long)GetTickCount64();
 
-	ASN1_INTEGER_set(X509_get_serialNumber(context->x509), serial);
+	if (ASN1_INTEGER_set(X509_get_serialNumber(context->x509), serial) != 1)
+		return -1;
+
 	{
-		ASN1_TIME* before = NULL;
-		ASN1_TIME* after = NULL;
+		ASN1_TIME* before = nullptr;
+		ASN1_TIME* after = nullptr;
 #if (OPENSSL_VERSION_NUMBER < 0x10100000L) || defined(LIBRESSL_VERSION_NUMBER)
 		before = X509_get_notBefore(context->x509);
 		after = X509_get_notAfter(context->x509);
@@ -996,57 +1054,48 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 		duration *= 60l * 60l * 24l;
 		X509_gmtime_adj(after, duration);
 	}
-	X509_set_pubkey(context->x509, context->pkey);
+	if (X509_set_pubkey(context->x509, context->pkey) != 1)
+		return -1;
+
 	name = X509_get_subject_name(context->x509);
 	arg = CommandLineFindArgumentA(args, "n");
 
 	if (arg->Flags & COMMAND_LINE_VALUE_PRESENT)
 	{
-		entry = x509_name_parse(arg->Value, "C", &length);
+		BOOL haveCN = FALSE;
 
-		if (entry)
-			X509_NAME_add_entry_by_txt(name, "C", MBSTRING_UTF8, (const unsigned char*)entry,
-			                           (int)length, -1, 0);
+		const char* records[] = { "CN", "ST", "OU", "L", "O", "C" };
 
-		entry = x509_name_parse(arg->Value, "ST", &length);
+		for (size_t x = 0; x < ARRAYSIZE(records); x++)
+		{
+			const char* record = records[x];
+			const int rc = add_entry(name, arg->Value, record);
+			if (rc < 0)
+				return rc;
+			if (x == 0)
+				haveCN = rc > 0;
+		}
 
-		if (entry)
-			X509_NAME_add_entry_by_txt(name, "ST", MBSTRING_UTF8, (const unsigned char*)entry,
-			                           (int)length, -1, 0);
-
-		entry = x509_name_parse(arg->Value, "L", &length);
-
-		if (entry)
-			X509_NAME_add_entry_by_txt(name, "L", MBSTRING_UTF8, (const unsigned char*)entry,
-			                           (int)length, -1, 0);
-
-		entry = x509_name_parse(arg->Value, "O", &length);
-
-		if (entry)
-			X509_NAME_add_entry_by_txt(name, "O", MBSTRING_UTF8, (const unsigned char*)entry,
-			                           (int)length, -1, 0);
-
-		entry = x509_name_parse(arg->Value, "OU", &length);
-
-		if (entry)
-			X509_NAME_add_entry_by_txt(name, "OU", MBSTRING_UTF8, (const unsigned char*)entry,
-			                           (int)length, -1, 0);
-
-		entry = context->common_name;
-		length = strlen(entry);
-		X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_UTF8, (const unsigned char*)entry,
-		                           (int)length, -1, 0);
+		if (!haveCN)
+		{
+			const int rc = add_entry(name, context->common_name, "CN");
+			if (rc < 0)
+				return rc;
+		}
 	}
 	else
 	{
-		entry = context->common_name;
-		length = strlen(entry);
-		X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_UTF8, (const unsigned char*)entry,
-		                           (int)length, -1, 0);
+		const int rc = add_entry(name, context->common_name, "CN");
+		if (rc < 0)
+			return rc;
 	}
 
-	X509_set_issuer_name(context->x509, name);
-	x509_add_ext(context->x509, NID_ext_key_usage, "serverAuth");
+	if (X509_set_issuer_name(context->x509, name) != 1)
+		return -1;
+
+	if (x509_add_ext(context->x509, NID_ext_key_usage, "serverAuth") != 1)
+		return -1;
+
 	arg = CommandLineFindArgumentA(args, "a");
 	md = EVP_sha256();
 
@@ -1066,15 +1115,12 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 
 	if (!context->silent)
 	{
-		BIO* bio = NULL;
-		int status = 0;
-		char* x509_str = NULL;
-		bio = BIO_new(BIO_s_mem());
+		BIO* bio = BIO_new(BIO_s_mem());
 
 		if (!bio)
 			return -1;
 
-		status = X509_print(bio, context->x509);
+		const int status = X509_print(bio, context->x509);
 
 		if (status < 0)
 		{
@@ -1082,7 +1128,7 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 			return -1;
 		}
 
-		x509_str = makecert_read_str(bio, NULL);
+		char* x509_str = makecert_read_str(bio, nullptr);
 		if (!x509_str)
 		{
 			BIO_free_all(bio);
@@ -1102,7 +1148,7 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 	{
 		if (!winpr_PathFileExists(context->output_path))
 		{
-			if (!winpr_PathMakePath(context->output_path, NULL))
+			if (!winpr_PathMakePath(context->output_path, nullptr))
 				return -1;
 		}
 
@@ -1125,6 +1171,9 @@ int makecert_context_process(MAKECERT_CONTEXT* context, int argc, char** argv)
 
 MAKECERT_CONTEXT* makecert_context_new(void)
 {
+	if (!utils_set_umask())
+		return nullptr;
+
 	MAKECERT_CONTEXT* context = (MAKECERT_CONTEXT*)calloc(1, sizeof(MAKECERT_CONTEXT));
 
 	if (context)
@@ -1140,7 +1189,7 @@ void makecert_context_free(MAKECERT_CONTEXT* context)
 {
 	if (context)
 	{
-		free(context->password);
+		winpr_zfree(context->password);
 		free(context->default_name);
 		free(context->common_name);
 		free(context->output_file);

@@ -240,17 +240,17 @@ static char testRdpFileUTF8[] =
 static char* append(const char* fmt, ...)
 {
 	int rc = 0;
-	char* dst = NULL;
-	va_list ap = { 0 };
+	char* dst = nullptr;
+	va_list ap = WINPR_C_ARRAY_INIT;
 
 	va_start(ap, fmt);
-	rc = vsnprintf(NULL, 0, fmt, ap);
+	rc = vsnprintf(nullptr, 0, fmt, ap);
 	va_end(ap);
 	if (rc < 0)
-		return NULL;
+		return nullptr;
 	dst = malloc((size_t)rc + 1);
 	if (!dst)
-		return NULL;
+		return nullptr;
 
 	va_start(ap, fmt);
 	rc = vsnprintf(dst, (size_t)rc + 1, fmt, ap);
@@ -258,7 +258,7 @@ static char* append(const char* fmt, ...)
 	if (rc < 0)
 	{
 		free(dst);
-		return NULL;
+		return nullptr;
 	}
 	return dst;
 }
@@ -278,7 +278,7 @@ static FILE* test_fopen(const char* name, const char* mode)
 static void* read_rdp_data(const char* name, size_t* plen)
 {
 	BOOL success = FALSE;
-	char* json = NULL;
+	char* json = nullptr;
 	FILE* fp = test_fopen(name, "r");
 	if (!fp)
 		goto fail;
@@ -305,11 +305,11 @@ static void* read_rdp_data(const char* name, size_t* plen)
 fail:
 	if (!success)
 	{
-		char buffer[128] = { 0 };
+		char buffer[128] = WINPR_C_ARRAY_INIT;
 		WLog_ERR(__func__, "failed to read data from '%s': %s", name,
 		         winpr_strerror(errno, buffer, sizeof(buffer)));
 		free(json);
-		json = NULL;
+		json = nullptr;
 	}
 
 	if (fp)
@@ -340,7 +340,7 @@ static bool save_settings(const rdpSettings* settings, const char* name)
 static char* get_json_name(const char* base, bool unchecked)
 {
 	size_t namelen = 0;
-	char* name = NULL;
+	char* name = nullptr;
 	winpr_asprintf(&name, &namelen, "%s%s.json", base, unchecked ? ".unchecked" : "");
 	return name;
 }
@@ -391,7 +391,7 @@ fail:
 	if (!rc)
 	{
 		freerdp_settings_free(settings);
-		return NULL;
+		return nullptr;
 	}
 	return settings;
 }
@@ -401,7 +401,7 @@ static rdpSettings* load_from_file(const char* name, bool unchecked)
 	size_t datalen = 0;
 	void* data = read_rdp_data(name, &datalen);
 	if (!data)
-		return NULL;
+		return nullptr;
 	rdpSettings* settings = load_from(data, datalen, unchecked);
 	free(data);
 	return settings;
@@ -411,10 +411,15 @@ static bool test_data(const char* json, const void* data, size_t len, bool unche
 {
 	bool rc = false;
 
+	wLog* log = WLog_Get(__func__);
 	rdpSettings* settings = load_from(data, len, unchecked);
 	rdpSettings* expect = read_json(json);
 	if (!settings || !expect)
+	{
+		WLog_Print(log, WLOG_ERROR, "Test case '%s': settings=%p, expect=%p", json, settings,
+		           expect);
 		goto fail;
+	}
 
 #ifndef WITH_GFX_H264
 	if (!freerdp_settings_set_bool(expect, FreeRDP_GfxH264, FALSE) ||
@@ -422,8 +427,7 @@ static bool test_data(const char* json, const void* data, size_t len, bool unche
 	    !freerdp_settings_set_bool(expect, FreeRDP_GfxAVC444v2, FALSE))
 		goto fail;
 #endif
-	wLog* log = WLog_Get(__func__);
-	WLog_Print(log, WLOG_INFO, "Test cast '%s'", json);
+	WLog_Print(log, WLOG_INFO, "Test case '%s'", json);
 	if (freerdp_settings_print_diff(log, WLOG_ERROR, expect, settings))
 		goto fail;
 	rc = true;
@@ -438,7 +442,7 @@ static HANDLE FindFirstFileUTF8(LPCSTR pszSearchPath, WIN32_FIND_DATAW* FindData
 	HANDLE hdl = INVALID_HANDLE_VALUE;
 	if (!pszSearchPath)
 		return hdl;
-	WCHAR* wpath = ConvertUtf8ToWCharAlloc(pszSearchPath, NULL);
+	WCHAR* wpath = ConvertUtf8ToWCharAlloc(pszSearchPath, nullptr);
 	if (!wpath)
 		return hdl;
 
@@ -453,7 +457,7 @@ static bool test_rdp_file(const char* base, bool allowCreate, bool unchecked)
 	bool rc = false;
 
 	size_t rdplen = 0;
-	char* rdp = NULL;
+	char* rdp = nullptr;
 	winpr_asprintf(&rdp, &rdplen, "%s.rdp", base);
 	char* json = get_json_name(base, unchecked);
 	size_t datalen = 0;
@@ -500,7 +504,7 @@ static bool test_rdp_files(bool allowCreate)
 	if (!path)
 		goto fail;
 
-	WIN32_FIND_DATAW FindData = { 0 };
+	WIN32_FIND_DATAW FindData = WINPR_C_ARRAY_INIT;
 	hdl = FindFirstFileUTF8(path, &FindData);
 
 	if (hdl == INVALID_HANDLE_VALUE)
@@ -517,8 +521,8 @@ static bool test_rdp_files(bool allowCreate)
 	{
 		if ((FindData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
 		{
-			char cFileName[6 * MAX_PATH] = { 0 };
-			char rdp[6 * MAX_PATH] = { 0 };
+			char cFileName[6 * MAX_PATH] = WINPR_C_ARRAY_INIT;
+			char rdp[6 * MAX_PATH] = WINPR_C_ARRAY_INIT;
 			ConvertWCharToUtf8(FindData.cFileName, cFileName, sizeof(cFileName));
 			const size_t len = strnlen(cFileName, sizeof(cFileName));
 			if (len < 4)
@@ -541,52 +545,15 @@ fail:
 	return rc;
 }
 
-int TestClientRdpFile(int argc, char* argv[])
+WINPR_ATTR_NODISCARD
+static BOOL test_ascii(rdpSettings* settings)
 {
-	int rc = -1;
-	int iValue = 0;
-	UINT32 uValue = 0;
-	const UINT32* puValue = NULL;
-	const char* sValue = NULL;
-	char* utfname = NULL;
-	char* uniname = NULL;
-	char* base = NULL;
-	char* tmp = NULL;
-	UINT64 id = 0;
-	rdpFile* file = NULL;
-	rdpSettings* settings = NULL;
+	WINPR_ASSERT(settings);
 
-	WINPR_UNUSED(argc);
-	WINPR_UNUSED(argv);
-	winpr_RAND(&id, sizeof(id));
-
-	/* UTF8 */
-#if defined(CHANNEL_URBDRC_CLIENT) && defined(CHANNEL_RDPECAM_CLIENT)
-	if (!test_data("testRdpFileUTF8.json", testRdpFileUTF8, sizeof(testRdpFileUTF8), false))
-		return -1;
-	if (!test_data("testRdpFileUTF8.unchecked.json", testRdpFileUTF8, sizeof(testRdpFileUTF8),
-	               true))
-		return -1;
-#endif
-
-	/* Unicode */
-#if defined(CHANNEL_URBDRC_CLIENT)
-	if (!test_data("testRdpFileUTF16.json", testRdpFileUTF16, sizeof(testRdpFileUTF16), false))
-		return -1;
-	if (!test_data("testRdpFileUTF16.unchecked.json", testRdpFileUTF16, sizeof(testRdpFileUTF16),
-	               true))
-		return -1;
-#endif
-
-#if defined(CHANNEL_URBDRC_CLIENT) && defined(CHANNEL_RDPECAM_CLIENT)
-	if (!test_rdp_files(argc > 1))
-		return -1;
-#endif
-
+	BOOL rc = FALSE;
 	/* Ascii */
-	file = freerdp_client_rdp_file_new();
-	settings = freerdp_settings_new(0);
-	if (!file || !settings)
+	rdpFile* file = freerdp_client_rdp_file_new();
+	if (!file)
 	{
 		printf("rdp_file_new failed\n");
 		goto fail;
@@ -603,14 +570,14 @@ int TestClientRdpFile(int argc, char* argv[])
 	{
 		printf("UseMultiMon mismatch: Actual: %" PRIu32 ", Expected: 0\n",
 		       freerdp_settings_get_bool(settings, FreeRDP_UseMultimon));
-		return -1;
+		goto fail;
 	}
 
 	if (!freerdp_settings_get_bool(settings, FreeRDP_Fullscreen))
 	{
 		printf("ScreenModeId mismatch: Actual: %" PRIu32 ", Expected: TRUE\n",
 		       freerdp_settings_get_bool(settings, FreeRDP_Fullscreen));
-		return -1;
+		goto fail;
 	}
 
 	if (strcmp(freerdp_settings_get_string(settings, FreeRDP_ServerHostname),
@@ -631,47 +598,56 @@ int TestClientRdpFile(int argc, char* argv[])
 		goto fail;
 	}
 
-	iValue = freerdp_client_rdp_file_get_integer_option(file, "dynamic resolution");
-	if (iValue != 1080)
 	{
-		printf("dynamic resolution uses invalid default value %d", iValue);
-		goto fail;
+		const int iValue = freerdp_client_rdp_file_get_integer_option(file, "dynamic resolution");
+		if (iValue != 1080)
+		{
+			printf("dynamic resolution uses invalid default value %d", iValue);
+			goto fail;
+		}
 	}
 	if (!freerdp_settings_get_bool(settings, FreeRDP_DynamicResolutionUpdate))
 	{
 		printf("FreeRDP_DynamicResolutionUpdate has invalid value");
 		goto fail;
 	}
-	iValue = freerdp_client_rdp_file_get_integer_option(file, "desktopscalefactor");
-	if (iValue != 1080)
 	{
-		printf("desktopscalefactor uses invalid default value %d", iValue);
-		goto fail;
-	}
-	if ((INT64)freerdp_settings_get_uint32(settings, FreeRDP_DesktopScaleFactor) != iValue)
-	{
-		printf("FreeRDP_DesktopScaleFactor has invalid value");
-		goto fail;
+		const int iValue = freerdp_client_rdp_file_get_integer_option(file, "desktopscalefactor");
+		if (iValue != 1080)
+		{
+			printf("desktopscalefactor uses invalid default value %d", iValue);
+			goto fail;
+		}
+		if ((INT64)freerdp_settings_get_uint32(settings, FreeRDP_DesktopScaleFactor) != iValue)
+		{
+			printf("FreeRDP_DesktopScaleFactor has invalid value");
+			goto fail;
+		}
 	}
 
 	/* Check [MS-RDPECAM] related options */
 #if defined(CHANNEL_RDPECAM_CLIENT)
 	{
-		ADDIN_ARGV* args = NULL;
-		iValue =
-		    freerdp_client_rdp_file_get_integer_option(file, "encode redirected video capture");
-		if (iValue != 1)
+		ADDIN_ARGV* args = nullptr;
 		{
-			printf("encode redirected video capture uses invalid default value %d", iValue);
-			goto fail;
+			const int iValue =
+			    freerdp_client_rdp_file_get_integer_option(file, "encode redirected video capture");
+			if (iValue != 1)
+			{
+				printf("encode redirected video capture uses invalid default value %d", iValue);
+				goto fail;
+			}
 		}
-		iValue = freerdp_client_rdp_file_get_integer_option(
-		    file, "redirected video capture encoding quality");
-		if (iValue != 2)
+
 		{
-			printf("redirected video capture encoding quality uses invalid default value %d",
-			       iValue);
-			goto fail;
+			const int iValue = freerdp_client_rdp_file_get_integer_option(
+			    file, "redirected video capture encoding quality");
+			if (iValue != 2)
+			{
+				printf("redirected video capture encoding quality uses invalid default value %d",
+				       iValue);
+				goto fail;
+			}
 		}
 		args = freerdp_dynamic_channel_collection_find(settings, RDPECAM_DVC_CHANNEL_NAME);
 		if (!args)
@@ -723,13 +699,14 @@ int TestClientRdpFile(int argc, char* argv[])
 #endif
 
 	/* Validate selectedmonitors:s:3,2,42,23 */
-	uValue = freerdp_settings_get_uint32(settings, FreeRDP_NumMonitorIds);
+	const UINT32 uValue = freerdp_settings_get_uint32(settings, FreeRDP_NumMonitorIds);
 	if (uValue != 4)
 	{
 		printf("FreeRDP_NumMonitorIds has invalid value %" PRIu32, uValue);
 		goto fail;
 	}
-	puValue = (const UINT32*)freerdp_settings_get_pointer_array(settings, FreeRDP_MonitorIds, 0);
+	const UINT32* puValue =
+	    (const UINT32*)freerdp_settings_get_pointer_array(settings, FreeRDP_MonitorIds, 0);
 	if (!puValue)
 	{
 		printf("FreeRDP_MonitorIds has invalid value %p", (const void*)puValue);
@@ -743,11 +720,13 @@ int TestClientRdpFile(int argc, char* argv[])
 		goto fail;
 	}
 
-	iValue = freerdp_client_rdp_file_get_integer_option(file, "videoplaybackmode");
-	if (iValue != 2)
 	{
-		printf("videoplaybackmode uses invalid default value %d", iValue);
-		goto fail;
+		const int iValue = freerdp_client_rdp_file_get_integer_option(file, "videoplaybackmode");
+		if (iValue != 2)
+		{
+			printf("videoplaybackmode uses invalid default value %d", iValue);
+			goto fail;
+		}
 	}
 	if (!freerdp_settings_get_bool(settings, FreeRDP_SupportVideoOptimized))
 	{
@@ -760,9 +739,11 @@ int TestClientRdpFile(int argc, char* argv[])
 		goto fail;
 	}
 
-	iValue = freerdp_client_rdp_file_get_integer_option(file, "vendor integer");
-	if (iValue != 123)
-		goto fail;
+	{
+		const int iValue = freerdp_client_rdp_file_get_integer_option(file, "vendor integer");
+		if (iValue != 123)
+			goto fail;
+	}
 
 	if (freerdp_client_rdp_file_set_integer_option(file, "vendor integer", 456) == -1)
 	{
@@ -770,22 +751,28 @@ int TestClientRdpFile(int argc, char* argv[])
 		goto fail;
 	}
 
-	iValue = freerdp_client_rdp_file_get_integer_option(file, "vendor integer");
-	if (iValue != 456)
-		return -1;
+	{
+		const int iValue = freerdp_client_rdp_file_get_integer_option(file, "vendor integer");
+		if (iValue != 456)
+			return -1;
+	}
 
-	const char microsoft[] = "microsoft";
-	sValue = freerdp_client_rdp_file_get_string_option(file, "vendor string");
-	if (strncmp(sValue, microsoft, sizeof(microsoft)) != 0)
+	{
+		const char microsoft[] = "microsoft";
+		const char* sValue = freerdp_client_rdp_file_get_string_option(file, "vendor string");
+		if (strncmp(sValue, microsoft, sizeof(microsoft)) != 0)
+			goto fail;
+	}
+	{
+		const char apple[] = "apple";
+		if (freerdp_client_rdp_file_set_string_option(file, "vendor string", "apple") == 0)
+			goto fail;
+		const char* sValue = freerdp_client_rdp_file_get_string_option(file, "vendor string");
+		if (strncmp(sValue, apple, sizeof(apple)) != 0)
+			goto fail;
+	}
+	if (freerdp_client_rdp_file_set_string_option(file, "fruits", "banana,oranges") == 0)
 		goto fail;
-
-	const char apple[] = "apple";
-	freerdp_client_rdp_file_set_string_option(file, "vendor string", "apple");
-	sValue = freerdp_client_rdp_file_get_string_option(file, "vendor string");
-	if (strncmp(sValue, apple, sizeof(apple)) != 0)
-		goto fail;
-
-	freerdp_client_rdp_file_set_string_option(file, "fruits", "banana,oranges");
 
 	if (freerdp_client_rdp_file_set_integer_option(file, "numbers", 123456789) == -1)
 	{
@@ -793,16 +780,35 @@ int TestClientRdpFile(int argc, char* argv[])
 		return -1;
 	}
 
+	rc = TRUE;
+fail:
 	freerdp_client_rdp_file_free(file);
+	return rc;
+}
 
-	tmp = GetKnownPath(KNOWN_PATH_TEMP);
+WINPR_ATTR_NODISCARD
+static BOOL test_foo(const rdpSettings* settings)
+{
+	WINPR_ASSERT(settings);
+
+	BOOL rc = FALSE;
+
+	UINT64 id = 0;
+	if (winpr_RAND(&id, sizeof(id)) < 0)
+		return FALSE;
+
+	rdpFile* file = nullptr;
+	char* base = nullptr;
+	char* utfname = nullptr;
+	char* uniname = nullptr;
+	char* tmp = GetKnownPath(KNOWN_PATH_TEMP);
 	if (!tmp)
 		goto fail;
 
 	base = append("%s/rdp-file-test-%" PRIx64, tmp, id);
 	if (!base)
 		goto fail;
-	if (!CreateDirectoryA(base, NULL))
+	if (!CreateDirectoryA(base, nullptr))
 		goto fail;
 	utfname = append("%s/utfname", base);
 	uniname = append("%s/uniname", base);
@@ -819,7 +825,7 @@ int TestClientRdpFile(int argc, char* argv[])
 	if (!freerdp_client_write_rdp_file(file, uniname, TRUE))
 		goto fail;
 
-	rc = 0;
+	rc = TRUE;
 fail:
 	if (utfname)
 		winpr_DeleteFile(utfname);
@@ -832,6 +838,46 @@ fail:
 	free(base);
 	free(tmp);
 	freerdp_client_rdp_file_free(file);
+	return rc;
+}
+
+int TestClientRdpFile(int argc, char* argv[])
+{
+	WINPR_UNUSED(argc);
+	WINPR_UNUSED(argv);
+
+	/* UTF8 */
+#if defined(CHANNEL_URBDRC_CLIENT) && defined(CHANNEL_RDPECAM_CLIENT)
+	if (!test_data("testRdpFileUTF8.json", testRdpFileUTF8, sizeof(testRdpFileUTF8), false))
+		return -1;
+	if (!test_data("testRdpFileUTF8.unchecked.json", testRdpFileUTF8, sizeof(testRdpFileUTF8),
+	               true))
+		return -1;
+#endif
+
+	/* Unicode */
+#if defined(CHANNEL_URBDRC_CLIENT)
+	if (!test_data("testRdpFileUTF16.json", testRdpFileUTF16, sizeof(testRdpFileUTF16), false))
+		return -1;
+	if (!test_data("testRdpFileUTF16.unchecked.json", testRdpFileUTF16, sizeof(testRdpFileUTF16),
+	               true))
+		return -1;
+#endif
+
+#if defined(CHANNEL_URBDRC_CLIENT) && defined(CHANNEL_RDPECAM_CLIENT)
+	if (!test_rdp_files(argc > 1))
+		return -1;
+#endif
+
+	rdpSettings* settings = freerdp_settings_new(0);
+	if (!settings)
+		return -1;
+
+	int rc = 0;
+	if (!test_ascii(settings))
+		rc = -1;
+	else if (!test_foo(settings))
+		rc = -1;
 	freerdp_settings_free(settings);
 	return rc;
 }

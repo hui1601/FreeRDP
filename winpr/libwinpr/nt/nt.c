@@ -48,11 +48,11 @@ static void sTebInitOnce(void)
 
 PTEB NtCurrentTeb(void)
 {
-	PTEB teb = NULL;
+	PTEB teb = nullptr;
 
 	if (pthread_once(&sTebOnceControl, sTebInitOnce) == 0)
 	{
-		if ((teb = pthread_getspecific(sTebKey)) == NULL)
+		if ((teb = pthread_getspecific(sTebKey)) == nullptr)
 		{
 			teb = calloc(1, sizeof(TEB));
 			if (teb)
@@ -63,7 +63,7 @@ PTEB NtCurrentTeb(void)
 }
 #endif
 
-const char* FSInformationClass2Tag(FILE_INFORMATION_CLASS value)
+const char* FSInformationClass2Tag(UINT32 value)
 {
 	switch (value)
 	{

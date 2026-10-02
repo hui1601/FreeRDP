@@ -59,7 +59,7 @@ static bool test_gdi_coords(size_t testNr, HGDI_DC hdc, const GDI_RGN* clip, con
 	}
 
 	const BOOL draw =
-	    gdi_ClipCoords(hdc, &(rgn1->x), &(rgn1->y), &(rgn1->w), &(rgn1->h), NULL, NULL);
+	    gdi_ClipCoords(hdc, &(rgn1->x), &(rgn1->y), &(rgn1->w), &(rgn1->h), nullptr, nullptr);
 	if (expect)
 	{
 		if (!draw)
@@ -72,8 +72,8 @@ static bool test_gdi_coords(size_t testNr, HGDI_DC hdc, const GDI_RGN* clip, con
 
 		if (!gdi_EqualRgn(rgn1, rgn2))
 		{
-			char buffer1[64] = { 0 };
-			char buffer2[64] = { 0 };
+			char buffer1[64] = WINPR_C_ARRAY_INIT;
+			char buffer2[64] = WINPR_C_ARRAY_INIT;
 			(void)fprintf(stderr, "[%s:%" PRIuz "] gdi_EqualRgn failed: expected %s, got %s\n",
 			              __func__, testNr, buffer1, buffer2);
 			goto fail;
@@ -101,8 +101,8 @@ fail:
 static int test_gdi_ClipCoords(void)
 {
 	int rc = -1;
-	HGDI_DC hdc = NULL;
-	HGDI_BITMAP bmp = NULL;
+	HGDI_DC hdc = nullptr;
+	HGDI_BITMAP bmp = nullptr;
 	const UINT32 format = PIXEL_FORMAT_ARGB32;
 
 	if (!(hdc = gdi_GetDC()))
@@ -112,9 +112,12 @@ static int test_gdi_ClipCoords(void)
 	}
 
 	hdc->format = format;
-	bmp = gdi_CreateBitmapEx(1024, 768, PIXEL_FORMAT_XRGB32, 0, NULL, NULL);
+	bmp = gdi_CreateBitmapEx(1024, 768, PIXEL_FORMAT_XRGB32, 0, nullptr, nullptr);
+	if (!bmp)
+		return -1;
 	gdi_SelectObject(hdc, (HGDIOBJECT)bmp);
-	gdi_SetNullClipRgn(hdc);
+	if (!gdi_SetNullClipRgn(hdc))
+		return -1;
 
 	struct testcase_t
 	{
@@ -140,17 +143,17 @@ static int test_gdi_ClipCoords(void)
 
 	const struct testcase_t testcases[] = {
 		/* null clipping region */
-		{ NULL, &rgn20x20_100x100, &rgn20x20_100x100 },
+		{ nullptr, &rgn20x20_100x100, &rgn20x20_100x100 },
 		/* region all inside clipping region */
 		{ &rgn0x0_1024x768, &rgn20x20_100x100, &rgn20x20_100x100 },
 		/* region all outside clipping region, on the left */
-		{ &rgn300x300_100x100, &rgn20x20_100x100, NULL },
+		{ &rgn300x300_100x100, &rgn20x20_100x100, nullptr },
 		/* region all outside clipping region, on the right */
-		{ &rgn300x300_100x100, &rgn420x420_100x100, NULL },
+		{ &rgn300x300_100x100, &rgn420x420_100x100, nullptr },
 		/* region all outside clipping region, on top */
-		{ &rgn300x300_100x100, &rgn300x20_100x100, NULL },
+		{ &rgn300x300_100x100, &rgn300x20_100x100, nullptr },
 		/* region all outside clipping region, at the bottom */
-		{ &rgn300x300_100x100, &rgn300x420_100x100, NULL },
+		{ &rgn300x300_100x100, &rgn300x420_100x100, nullptr },
 		/* left outside, right = clip, top = clip, bottom = clip */
 		{ &rgn300x300_100x100, &rgn100x300_300x100, &rgn300x300_100x100 },
 		/* left outside, right inside, top = clip, bottom = clip */
@@ -184,11 +187,11 @@ fail:
 static int test_gdi_InvalidateRegion(void)
 {
 	int rc = -1;
-	HGDI_DC hdc = NULL;
-	HGDI_RGN rgn1 = NULL;
-	HGDI_RGN rgn2 = NULL;
-	HGDI_RGN invalid = NULL;
-	HGDI_BITMAP bmp = NULL;
+	HGDI_DC hdc = nullptr;
+	HGDI_RGN rgn1 = nullptr;
+	HGDI_RGN rgn2 = nullptr;
+	HGDI_RGN invalid = nullptr;
+	HGDI_BITMAP bmp = nullptr;
 	const UINT32 format = PIXEL_FORMAT_XRGB32;
 
 	if (!(hdc = gdi_GetDC()))
@@ -198,11 +201,18 @@ static int test_gdi_InvalidateRegion(void)
 	}
 
 	hdc->format = format;
-	bmp = gdi_CreateBitmapEx(1024, 768, PIXEL_FORMAT_XRGB32, 0, NULL, NULL);
+	bmp = gdi_CreateBitmapEx(1024, 768, PIXEL_FORMAT_XRGB32, 0, nullptr, nullptr);
+	if (!bmp)
+		goto fail;
 	gdi_SelectObject(hdc, (HGDIOBJECT)bmp);
-	gdi_SetNullClipRgn(hdc);
+	if (!gdi_SetNullClipRgn(hdc))
+		goto fail;
 	hdc->hwnd = (HGDI_WND)calloc(1, sizeof(GDI_WND));
+	if (!hdc->hwnd)
+		goto fail;
 	hdc->hwnd->invalid = gdi_CreateRectRgn(0, 0, 0, 0);
+	if (!hdc->hwnd->invalid)
+		goto fail;
 	hdc->hwnd->invalid->null = TRUE;
 	invalid = hdc->hwnd->invalid;
 	hdc->hwnd->count = 16;
@@ -213,126 +223,181 @@ static int test_gdi_InvalidateRegion(void)
 	rgn2->null = TRUE;
 	/* no previous invalid region */
 	invalid->null = TRUE;
-	gdi_SetRgn(rgn1, 300, 300, 100, 100);
-	gdi_SetRgn(rgn2, 300, 300, 100, 100);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(rgn1, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* region same as invalid region */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 300, 100, 100);
-	gdi_SetRgn(rgn2, 300, 300, 100, 100);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* left outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 100, 300, 300, 100);
-	gdi_SetRgn(rgn2, 100, 300, 300, 100);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 100, 300, 300, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 100, 300, 300, 100))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* right outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 300, 300, 100);
-	gdi_SetRgn(rgn2, 300, 300, 300, 100);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 300, 300, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 300, 300, 100))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* top outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 100, 100, 300);
-	gdi_SetRgn(rgn2, 300, 100, 100, 300);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 100, 100, 300))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 100, 100, 300))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* bottom outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 300, 100, 300);
-	gdi_SetRgn(rgn2, 300, 300, 100, 300);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 300, 100, 300))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 300, 100, 300))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* left outside, right outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 100, 300, 600, 300);
-	gdi_SetRgn(rgn2, 100, 300, 600, 300);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 100, 300, 600, 300))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 100, 300, 600, 300))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* top outside, bottom outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 100, 100, 500);
-	gdi_SetRgn(rgn2, 300, 100, 100, 500);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 100, 100, 500))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 100, 100, 500))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* all outside, left */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 100, 300, 100, 100);
-	gdi_SetRgn(rgn2, 100, 300, 300, 100);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 100, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 100, 300, 300, 100))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* all outside, right */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 700, 300, 100, 100);
-	gdi_SetRgn(rgn2, 300, 300, 500, 100);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 700, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 300, 500, 100))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* all outside, top */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 100, 100, 100);
-	gdi_SetRgn(rgn2, 300, 100, 100, 300);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 100, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 100, 100, 300))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* all outside, bottom */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 300, 500, 100, 100);
-	gdi_SetRgn(rgn2, 300, 300, 100, 300);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 300, 500, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 300, 300, 100, 300))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* all outside */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 100, 100, 600, 600);
-	gdi_SetRgn(rgn2, 100, 100, 600, 600);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 100, 100, 600, 600))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 100, 100, 600, 600))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;
 
 	/* everything */
-	gdi_SetRgn(invalid, 300, 300, 100, 100);
-	gdi_SetRgn(rgn1, 0, 0, 1024, 768);
-	gdi_SetRgn(rgn2, 0, 0, 1024, 768);
-	gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h);
+	if (!gdi_SetRgn(invalid, 300, 300, 100, 100))
+		goto fail;
+	if (!gdi_SetRgn(rgn1, 0, 0, 1024, 768))
+		goto fail;
+	if (!gdi_SetRgn(rgn2, 0, 0, 1024, 768))
+		goto fail;
+	if (!gdi_InvalidateRegion(hdc, rgn1->x, rgn1->y, rgn1->w, rgn1->h))
+		goto fail;
 
 	if (!gdi_EqualRgn(invalid, rgn2))
 		goto fail;

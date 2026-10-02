@@ -29,7 +29,7 @@
 #include <emmintrin.h>
 #include <pmmintrin.h>
 
-static primitives_t* generic = NULL;
+static primitives_t* generic = nullptr;
 
 /* ------------------------------------------------------------------------- */
 SSE3_SSD_ROUTINE(sse3_add_16s, INT16, generic->add_16s, _mm_adds_epi16,
@@ -45,7 +45,7 @@ static pstatus_t sse3_add_16s_inplace(INT16* WINPR_RESTRICT pSrcDst1,
 	if (ulen < 16) /* pointless if too small */
 		return generic->add_16s_inplace(pSrcDst1, pSrcDst2, ulen);
 
-	UINT32 offBeatMask = (1 << (shifts - 1)) - 1;
+	UINT32 offBeatMask = (1u << (shifts - 1)) - 1;
 	if ((ULONG_PTR)pSrcDst1 & offBeatMask)
 	{
 		/* Incrementing the pointer skips over 16-byte boundary. */
@@ -71,10 +71,10 @@ static pstatus_t sse3_add_16s_inplace(INT16* WINPR_RESTRICT pSrcDst1,
 		/* Unaligned loads */
 		while (count--)
 		{
-			const __m128i* vsptr1 = (const __m128i*)dptr1;
-			const __m128i* vsptr2 = (const __m128i*)dptr2;
-			__m128i* vdptr1 = (__m128i*)dptr1;
-			__m128i* vdptr2 = (__m128i*)dptr2;
+			const __m128i* vsptr1 = WINPR_PACKED_ALIGN_CAST(const __m128i*, dptr1);
+			const __m128i* vsptr2 = WINPR_PACKED_ALIGN_CAST(const __m128i*, dptr2);
+			__m128i* vdptr1 = WINPR_PACKED_ALIGN_CAST(__m128i*, dptr1);
+			__m128i* vdptr2 = WINPR_PACKED_ALIGN_CAST(__m128i*, dptr2);
 
 			__m128i xmm0 = LOAD_SI128(vsptr1++);
 			__m128i xmm1 = LOAD_SI128(vsptr1++);
@@ -109,10 +109,10 @@ static pstatus_t sse3_add_16s_inplace(INT16* WINPR_RESTRICT pSrcDst1,
 		/* Aligned loads */
 		while (count--)
 		{
-			const __m128i* vsptr1 = (const __m128i*)dptr1;
-			const __m128i* vsptr2 = (const __m128i*)dptr2;
-			__m128i* vdptr1 = (__m128i*)dptr1;
-			__m128i* vdptr2 = (__m128i*)dptr2;
+			const __m128i* vsptr1 = WINPR_PACKED_ALIGN_CAST(const __m128i*, dptr1);
+			const __m128i* vsptr2 = WINPR_PACKED_ALIGN_CAST(const __m128i*, dptr2);
+			__m128i* vdptr1 = WINPR_PACKED_ALIGN_CAST(__m128i*, dptr1);
+			__m128i* vdptr2 = WINPR_PACKED_ALIGN_CAST(__m128i*, dptr2);
 
 			__m128i xmm0 = LOAD_SI128(vsptr1++);
 			__m128i xmm1 = LOAD_SI128(vsptr1++);
@@ -147,10 +147,10 @@ static pstatus_t sse3_add_16s_inplace(INT16* WINPR_RESTRICT pSrcDst1,
 	len -= count << (5 - shifts);
 	while (count--)
 	{
-		const __m128i* vsptr1 = (const __m128i*)dptr1;
-		const __m128i* vsptr2 = (const __m128i*)dptr2;
-		__m128i* vdptr1 = (__m128i*)dptr1;
-		__m128i* vdptr2 = (__m128i*)dptr2;
+		const __m128i* vsptr1 = WINPR_PACKED_ALIGN_CAST(const __m128i*, dptr1);
+		const __m128i* vsptr2 = WINPR_PACKED_ALIGN_CAST(const __m128i*, dptr2);
+		__m128i* vdptr1 = WINPR_PACKED_ALIGN_CAST(__m128i*, dptr1);
+		__m128i* vdptr2 = WINPR_PACKED_ALIGN_CAST(__m128i*, dptr2);
 
 		__m128i xmm0 = LOAD_SI128(vsptr1);
 		__m128i xmm1 = LOAD_SI128(vsptr2);

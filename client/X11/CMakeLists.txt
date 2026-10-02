@@ -40,6 +40,7 @@ include_directories(SYSTEM ${X11_INCLUDE_DIRS})
 include_directories(SYSTEM ${OPENSSL_INCLUDE_DIR})
 
 set(SRCS
+    xf_types.h
     xf_utils.h
     xf_utils.c
     xf_x11_utils.c
@@ -60,6 +61,8 @@ set(SRCS
     xf_channels.h
     xf_cliprdr.c
     xf_cliprdr.h
+    xf_reconnect.c
+    xf_reconnect.h
     xf_monitor.c
     xf_monitor.h
     xf_disp.c
@@ -182,7 +185,7 @@ endif()
 list(APPEND PUB_LIBS freerdp-client)
 
 list(APPEND PRIV_LIBS m)
-if(NOT APPLE)
+if(NOT APPLE AND NOT OPENBSD)
   list(APPEND PRIV_LIBS rt)
 endif()
 target_link_libraries(${PROJECT_NAME} PUBLIC ${PUB_LIBS})
@@ -191,6 +194,10 @@ target_link_libraries(${PROJECT_NAME} PRIVATE ${PRIV_LIBS})
 if(WITH_CLIENT_INTERFACE)
   installwithrpath(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT libraries)
 endif()
+if(BUILD_TESTING)
+  add_subdirectory(test)
+endif()
+
 add_subdirectory(cli)
 add_subdirectory(man)
 

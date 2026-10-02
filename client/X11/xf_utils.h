@@ -62,7 +62,7 @@ int LogDynAndXFreePixmap_ex(wLog* log, const char* file, const char* fkt, size_t
 Window LogDynAndXCreateWindow_ex(wLog* log, const char* file, const char* fkt, size_t line,
                                  Display* display, Window parent, int x, int y, unsigned int width,
                                  unsigned int height, unsigned int border_width, int depth,
-                                 unsigned int class, Visual* visual, unsigned long valuemask,
+                                 unsigned int c_class, Visual* visual, unsigned long valuemask,
                                  XSetWindowAttributes* attributes);
 
 #define LogDynAndXRaiseWindow(log, display, w) \
@@ -127,7 +127,7 @@ int LogDynAndXClearWindow_ex(wLog* log, const char* file, const char* fkt, size_
 
 int LogDynAndXGetWindowProperty_ex(wLog* log, const char* file, const char* fkt, size_t line,
                                    Display* display, Window w, Atom property, long long_offset,
-                                   long long_length, Bool delete, Atom req_type,
+                                   long long_length, Bool c_delete, Atom req_type,
                                    Atom* actual_type_return, int* actual_format_return,
                                    unsigned long* nitems_return, unsigned long* bytes_after_return,
                                    unsigned char** prop_return);
@@ -293,8 +293,23 @@ extern int LogDynAndXSetFunction_ex(wLog* log, const char* file, const char* fkt
 extern int LogDynAndXRestackWindows_ex(wLog* log, const char* file, const char* fkt, size_t line,
                                        Display* display, Window* windows, int nwindows);
 
+#define LogDynAndXGetWindowAttributes(log, display, window, attr) \
+	LogDynAndXGetWindowAttributes_ex(log, __FILE__, __func__, __LINE__, (display), (window), (attr))
+WINPR_ATTR_NODISCARD
+extern int LogDynAndXGetWindowAttributes_ex(wLog* log, const char* file, const char* fkt,
+                                            size_t line, Display* display, Window w,
+                                            XWindowAttributes* window_attributes_return);
+
+#define LogDynAndXSelectInput(log, display, window, mask) \
+	LogDynAndXSelectInput_ex(log, __FILE__, __func__, __LINE__, (display), (window), (mask))
+extern int LogDynAndXSelectInput_ex(wLog* log, const char* file, const char* fkt, size_t line,
+                                    Display* display, Window w, long event_mask);
+
+WINPR_ATTR_NODISCARD
 BOOL IsGnome(void);
 
+WINPR_ATTR_MALLOC(free, 1)
 char* getConfigOption(BOOL system, const char* option);
 
+WINPR_ATTR_NODISCARD
 const char* request_code_2_str(int code);

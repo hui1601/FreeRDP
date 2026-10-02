@@ -24,7 +24,11 @@
 
 #include <freerdp/config.h>
 
-typedef struct xf_context xfContext;
+#include "xf_types.h"
+#include "xf_disp.h"
+#include "xf_cliprdr.h"
+#include "xf_video.h"
+#include "xf_rail.h"
 
 #ifdef WITH_XCURSOR
 #include <X11/Xcursor/Xcursor.h>
@@ -54,6 +58,7 @@ typedef struct xf_context xfContext;
 #include <freerdp/codec/progressive.h>
 #include <freerdp/codec/region.h>
 #include <freerdp/locale/keyboard.h>
+#include <freerdp/client.h>
 
 #if !defined(XcursorUInt)
 typedef unsigned int XcursorUInt;
@@ -109,11 +114,6 @@ struct xf_glyph
 };
 typedef struct xf_glyph xfGlyph;
 
-typedef struct xf_clipboard xfClipboard;
-typedef struct s_xfDispContext xfDispContext;
-typedef struct s_xfVideoContext xfVideoContext;
-typedef struct xf_rail_icon_cache xfRailIconCache;
-
 /* Number of buttons that are mapped from X11 to RDP button events. */
 #define NUM_BUTTONS_MAPPED 11
 
@@ -168,9 +168,12 @@ struct xf_context
 	BOOL debug;
 	HANDLE x11event;
 	xfWindow* window;
+	Window reconnectWindow;
+	char reconnectMessage[128];
 	xfAppWindow* appWindow;
 	xfPointer* pointer;
 	xfWorkArea workArea;
+	xfWorkArea railWorkArea;
 	xfFullscreenMonitors fullscreenMonitors;
 	int current_desktop;
 	BOOL remote_app;
@@ -290,6 +293,10 @@ struct xf_context
 	wHashTable* railWindows;
 	xfRailIconCache* railIconCache;
 
+#if defined(WITH_VERBOSE_WINPR_ASSERT)
+	BOOL isRailWindowsLocked;
+#endif
+
 	BOOL xkbAvailable;
 	BOOL xrenderAvailable;
 
@@ -319,6 +326,9 @@ struct xf_context
 	DWORD X11_KEYCODE_TO_VIRTUAL_SCANCODE[256];
 	bool isCursorHidden;
 	bool isActionScriptAllowed;
+	bool exposeRequested;
+	GDI_RGN exposedArea;
+	Window exposedWindow;
 };
 
 BOOL xf_create_window(xfContext* xfc);
@@ -394,7 +404,8 @@ enum XF_EXIT_CODE
 	XF_EXIT_CONNECT_LOGON_TYPE_NOT_GRANTED = 158,
 	XF_EXIT_CONNECT_NO_OR_MISSING_CREDENTIALS = 159,
 	XF_EXIT_CONNECT_TARGET_BOOTING = 160,
-	XF_EXIT_CODE_LAST = XF_EXIT_CONNECT_TARGET_BOOTING,
+	XF_EXIT_CONNECT_HYBRID_REQUIRED_BY_SERVER = 161,
+	XF_EXIT_CODE_LAST = XF_EXIT_CONNECT_HYBRID_REQUIRED_BY_SERVER,
 	XF_EXIT_UNKNOWN = 255,
 };
 

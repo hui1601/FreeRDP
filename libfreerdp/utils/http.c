@@ -54,7 +54,7 @@ static void log_errors_(wLog* log, const char* msg, const char* file, const char
 	{
 		error_logged = TRUE;
 		WLog_PrintTextMessage(log, level, line, file, fkt, "%s: %s", msg,
-		                      ERR_error_string(ec, NULL));
+		                      ERR_error_string(ec, nullptr));
 	}
 	if (!error_logged)
 		WLog_PrintTextMessage(log, level, line, file, fkt, "%s (no details available)", msg);
@@ -91,15 +91,15 @@ BOOL freerdp_http_request(const char* url, const char* body, long* status_code, 
                           size_t* response_length)
 {
 	BOOL ret = FALSE;
-	char* hostname = NULL;
-	const char* path = NULL;
-	char* headers = NULL;
+	char* hostname = nullptr;
+	const char* path = nullptr;
+	char* headers = nullptr;
 	size_t size = 0;
 	int status = 0;
-	char buffer[1024] = { 0 };
-	BIO* bio = NULL;
-	SSL_CTX* ssl_ctx = NULL;
-	SSL* ssl = NULL;
+	char buffer[1024] = WINPR_C_ARRAY_INIT;
+	BIO* bio = nullptr;
+	SSL_CTX* ssl_ctx = nullptr;
+	SSL* ssl = nullptr;
 
 	WINPR_ASSERT(status_code);
 	WINPR_ASSERT(response);
@@ -108,7 +108,7 @@ BOOL freerdp_http_request(const char* url, const char* body, long* status_code, 
 	wLog* log = WLog_Get(TAG);
 	WINPR_ASSERT(log);
 
-	*response = NULL;
+	*response = nullptr;
 
 	if (!url || strnlen(url, 8) < 8 || strncmp(url, "https://", 8) != 0 ||
 	    !(path = strchr(url + 8, '/')))
@@ -117,105 +117,114 @@ BOOL freerdp_http_request(const char* url, const char* body, long* status_code, 
 		goto out;
 	}
 
-	const size_t len = WINPR_ASSERTING_INT_CAST(size_t, path - (url + 8));
-	hostname = strndup(&url[8], len);
+	{
+		const size_t len = WINPR_ASSERTING_INT_CAST(size_t, path - (url + 8));
+		hostname = strndup(&url[8], len);
+	}
 	if (!hostname)
 		return FALSE;
 
-	size_t blen = 0;
-	if (body)
 	{
-		blen = strlen(body);
-		if (winpr_asprintf(&headers, &size, post_header_fmt, path, hostname, blen) < 0)
+		size_t blen = 0;
+		if (body)
 		{
-			free(hostname);
-			return FALSE;
+			blen = strlen(body);
+			if (winpr_asprintf(&headers, &size, post_header_fmt, path, hostname, blen) < 0)
+			{
+				free(hostname);
+				return FALSE;
+			}
 		}
-	}
-	else
-	{
-		if (winpr_asprintf(&headers, &size, get_header_fmt, path, hostname) < 0)
+		else
 		{
-			free(hostname);
-			return FALSE;
+			if (winpr_asprintf(&headers, &size, get_header_fmt, path, hostname) < 0)
+			{
+				free(hostname);
+				return FALSE;
+			}
 		}
-	}
 
-	ssl_ctx = SSL_CTX_new(TLS_client_method());
+		ssl_ctx = SSL_CTX_new(TLS_client_method());
 
-	if (!ssl_ctx)
-	{
-		log_errors(log, "could not set up ssl context");
-		goto out;
-	}
-
-	if (!SSL_CTX_set_default_verify_paths(ssl_ctx))
-	{
-		log_errors(log, "could not set ssl context verify paths");
-		goto out;
-	}
-
-	SSL_CTX_set_mode(ssl_ctx, SSL_MODE_AUTO_RETRY);
-
-	bio = BIO_new_ssl_connect(ssl_ctx);
-	if (!bio)
-	{
-		log_errors(log, "could not set up connection");
-		goto out;
-	}
-
-	if (BIO_set_conn_port(bio, "https") <= 0)
-	{
-		log_errors(log, "could not set port");
-		goto out;
-	}
-
-	if (!BIO_set_conn_hostname(bio, hostname))
-	{
-		log_errors(log, "could not set hostname");
-		goto out;
-	}
-
-	BIO_get_ssl(bio, &ssl);
-	if (!ssl)
-	{
-		log_errors(log, "could not get ssl");
-		goto out;
-	}
-
-	if (!SSL_set_tlsext_host_name(ssl, hostname))
-	{
-		log_errors(log, "could not set sni hostname");
-		goto out;
-	}
-
-	WLog_Print(log, WLOG_DEBUG, "headers:\n%s", headers);
-	ERR_clear_error();
-	const size_t hlen = strnlen(headers, size);
-	if (hlen > INT32_MAX)
-		goto out;
-
-	if (BIO_write(bio, headers, (int)hlen) < 0)
-	{
-		log_errors(log, "could not write headers");
-		goto out;
-	}
-
-	if (body)
-	{
-		WLog_Print(log, WLOG_DEBUG, "body:\n%s", body);
-
-		if (blen > INT_MAX)
+		if (!ssl_ctx)
 		{
-			WLog_Print(log, WLOG_ERROR, "body too long!");
+			log_errors(log, "could not set up ssl context");
 			goto out;
 		}
 
+		if (!SSL_CTX_set_default_verify_paths(ssl_ctx))
+		{
+			log_errors(log, "could not set ssl context verify paths");
+			goto out;
+		}
+
+		SSL_CTX_set_verify(ssl_ctx, SSL_VERIFY_PEER, nullptr);
+
+		SSL_CTX_set_mode(ssl_ctx, SSL_MODE_AUTO_RETRY);
+
+		bio = BIO_new_ssl_connect(ssl_ctx);
+		if (!bio)
+		{
+			log_errors(log, "could not set up connection");
+			goto out;
+		}
+
+		if (BIO_set_conn_port(bio, "https") <= 0)
+		{
+			log_errors(log, "could not set port");
+			goto out;
+		}
+
+		if (!BIO_set_conn_hostname(bio, hostname))
+		{
+			log_errors(log, "could not set hostname");
+			goto out;
+		}
+
+		BIO_get_ssl(bio, &ssl);
+		if (!ssl)
+		{
+			log_errors(log, "could not get ssl");
+			goto out;
+		}
+
+		if (!SSL_set_tlsext_host_name(ssl, hostname))
+		{
+			log_errors(log, "could not set sni hostname");
+			goto out;
+		}
+
+		WLog_Print(log, WLOG_DEBUG, "headers:\n%s", headers);
 		ERR_clear_error();
-		if (BIO_write(bio, body, (int)blen) < 0)
+
 		{
-			log_errors(log, "could not write body");
-			goto out;
+			const size_t hlen = strnlen(headers, size);
+			if (hlen > INT32_MAX)
+				goto out;
+
+			if (BIO_write(bio, headers, (int)hlen) < 0)
+			{
+				log_errors(log, "could not write headers");
+				goto out;
+			}
+
+			if (body)
+			{
+				WLog_Print(log, WLOG_DEBUG, "body:\n%s", body);
+
+				if (blen > INT_MAX)
+				{
+					WLog_Print(log, WLOG_ERROR, "body too long!");
+					goto out;
+				}
+
+				ERR_clear_error();
+				if (BIO_write(bio, body, (int)blen) < 0)
+				{
+					log_errors(log, "could not write body");
+					goto out;
+				}
+			}
 		}
 	}
 
@@ -226,10 +235,20 @@ BOOL freerdp_http_request(const char* url, const char* body, long* status_code, 
 		goto out;
 	}
 
-	// NOLINTNEXTLINE(cert-err34-c)
-	if (sscanf(buffer, "HTTP/1.1 %li %*[^\r\n]\r\n", status_code) < 1)
+	const char header[9] = { 'H', 'T', 'T', 'P', '/', '1', '.', '1', ' ' };
+	if ((status < (INT64)sizeof(header)) || (strncmp(header, buffer, sizeof(header)) != 0))
 	{
-		WLog_Print(log, WLOG_ERROR, "invalid HTTP status line");
+		WLog_Print(log, WLOG_ERROR, "invalid HTTP status header");
+		goto out;
+	}
+
+	errno = 0;
+	*status_code = strtol(&buffer[sizeof(header)], nullptr, 0);
+	if (errno != 0)
+	{
+		char ebuffer[256] = WINPR_C_ARRAY_INIT;
+		WLog_Print(log, WLOG_ERROR, "invalid HTTP status line: %s [%d]",
+		           winpr_strerror(errno, ebuffer, sizeof(ebuffer)), errno);
 		goto out;
 	}
 
@@ -242,15 +261,15 @@ BOOL freerdp_http_request(const char* url, const char* body, long* status_code, 
 			goto out;
 		}
 
-		char* val = NULL;
+		char* val = nullptr;
 		char* name = strtok_s(buffer, ":", &val);
 		if (name && (_stricmp(name, "content-length") == 0))
 		{
 			errno = 0;
-			*response_length = strtoul(val, NULL, 10);
+			*response_length = strtoul(val, nullptr, 10);
 			if (errno)
 			{
-				char ebuffer[256] = { 0 };
+				char ebuffer[256] = WINPR_C_ARRAY_INIT;
 				WLog_Print(log, WLOG_ERROR, "could not parse content length (%s): %s [%d]", val,
 				           winpr_strerror(errno, ebuffer, sizeof(ebuffer)), errno);
 				goto out;
@@ -296,7 +315,7 @@ out:
 	if (!ret)
 	{
 		free(*response);
-		*response = NULL;
+		*response = nullptr;
 		*response_length = 0;
 	}
 	free(hostname);

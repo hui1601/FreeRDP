@@ -22,11 +22,12 @@
 #include <cassert>
 
 #include <freerdp/log.h>
+#include <freerdp/utils/passphrase.h>
 #include <freerdp/utils/smartcardlogon.h>
 
 #include <SDL3/SDL.h>
 
-#include "../sdl_freerdp.hpp"
+#include "../sdl_context.hpp"
 #include "sdl_dialogs.hpp"
 #include "sdl_input_widget_pair.hpp"
 #include "sdl_input_widget_pair_list.hpp"
@@ -100,6 +101,7 @@ BOOL sdl_authenticate_ex(freerdp* instance, char** username, char** password, ch
 		case AUTH_TLS:
 		case AUTH_RDP:
 		case AUTH_SMARTCARD_PIN: /* in this case password is pin code */
+		case AUTH_FIDO_PIN:
 			if ((*username) && (*password))
 				return TRUE;
 			break;
@@ -129,6 +131,31 @@ BOOL sdl_authenticate_ex(freerdp* instance, char** username, char** password, ch
 	u = *username;
 	d = *domain;
 	p = *password;
+
+	auto sdl = get_context(instance);
+	if (!p && !sdl->credentialsRead())
+	{
+		std::string line;
+		line.reserve(1024);
+
+		const BOOL fromStdin =
+		    freerdp_settings_get_bool(instance->context->settings, FreeRDP_CredentialsFromStdin);
+		auto env =
+		    freerdp_passphrase_from_env(instance->context, title, line.data(), line.capacity());
+		if (!env && fromStdin)
+			env = freerdp_passphrase_read(instance->context, title, line.data(), line.capacity(),
+			                              fromStdin);
+		if (env)
+			p = _strdup(env);
+
+		*password = p;
+		if (p)
+		{
+			sdl->setCredentialsRead();
+			if (u)
+				return TRUE;
+		}
+	}
 
 	if (!sdl_push_user_event(SDL_EVENT_USER_AUTH_DIALOG, title, u, d, p, reason))
 		return res;
@@ -212,24 +239,24 @@ SSIZE_T sdl_retry_dialog(freerdp* instance, const char* what, size_t current,
 	const BOOL enabled = freerdp_settings_get_bool(settings, FreeRDP_AutoReconnectionEnabled);
 	const size_t delay = freerdp_settings_get_uint32(settings, FreeRDP_TcpConnectTimeout);
 
-	sdl->dialog.setTitle("Retry connection to %s",
-	                     freerdp_settings_get_server_name(instance->context->settings));
+	sdl->getDialog().setTitle("Retry connection to %s",
+	                          freerdp_settings_get_server_name(instance->context->settings));
 
 	if ((strcmp(what, "arm-transport") != 0) && (strcmp(what, "connection") != 0))
 	{
-		sdl->dialog.showError("Unknown module %s, aborting", what);
+		sdl->getDialog().showError("Unknown module %s, aborting", what);
 		return -1;
 	}
 
 	if (current == 0)
 	{
 		if (strcmp(what, "arm-transport") == 0)
-			sdl->dialog.showWarn("[%s] Starting your VM. It may take up to 5 minutes", what);
+			sdl->getDialog().showWarn("[%s] Starting your VM. It may take up to 5 minutes", what);
 	}
 
 	if (!enabled)
 	{
-		sdl->dialog.showError(
+		sdl->getDialog().showError(
 		    "Automatic reconnection disabled, terminating. Try to connect again later");
 		return -1;
 	}
@@ -237,16 +264,16 @@ SSIZE_T sdl_retry_dialog(freerdp* instance, const char* what, size_t current,
 	const size_t max = freerdp_settings_get_uint32(settings, FreeRDP_AutoReconnectMaxRetries);
 	if (current >= max)
 	{
-		sdl->dialog.showError(
+		sdl->getDialog().showError(
 		    "[%s] retries exceeded. Your VM failed to start. Try again later or contact your "
 		    "tech support for help if this keeps happening.",
 		    what);
 		return -1;
 	}
 
-	sdl->dialog.showInfo("[%s] retry %" PRIuz "/%" PRIuz ", delaying %" PRIuz
-	                     "ms before next attempt",
-	                     what, current + 1, max, delay);
+	sdl->getDialog().showInfo("[%s] retry %" PRIuz "/%" PRIuz ", delaying %" PRIuz
+	                          "ms before next attempt",
+	                          what, current + 1, max, delay);
 	return WINPR_ASSERTING_INT_CAST(ssize_t, delay);
 }
 
@@ -539,6 +566,7 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 	const std::vector<std::string> auth = { "Username:        ", "Domain:          ",
 		                                    "Password:        " };
 	const std::vector<std::string> authPin = { "Device:       ", "PIN:        " };
+	const std::vector<std::string> fidoPin = { "FIDO2 PIN:    " };
 	const std::vector<std::string> gw = { "GatewayUsername: ", "GatewayDomain:   ",
 		                                  "GatewayPassword: " };
 	std::vector<std::string> prompt;
@@ -548,6 +576,9 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 	{
 		case AUTH_SMARTCARD_PIN:
 			prompt = authPin;
+			break;
+		case AUTH_FIDO_PIN:
+			prompt = fidoPin;
 			break;
 		case AUTH_RDSTLS:
 		case AUTH_TLS:
@@ -566,24 +597,25 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 
 	std::vector<std::string> result;
 
+	auto parent = SDL_GetMouseFocus();
+	if (!parent)
+		parent = SDL_GetKeyboardFocus();
+
 	if (!prompt.empty())
 	{
 		std::vector<std::string> initial{ args->user ? args->user : "Smartcard", "" };
 		std::vector<Uint32> flags = { SdlInputWidgetPair::SDL_INPUT_READONLY,
 			                          SdlInputWidgetPair::SDL_INPUT_MASK };
-		if (args->result != AUTH_SMARTCARD_PIN)
+		if (args->result == AUTH_FIDO_PIN)
 		{
-			if (args->result == AUTH_RDSTLS)
-			{
-				initial = { args->user ? args->user : "", args->password ? args->password : "" };
-				flags = { 0, SdlInputWidgetPair::SDL_INPUT_MASK };
-			}
-			else
-			{
-				initial = { args->user ? args->user : "", args->domain ? args->domain : "",
-					        args->password ? args->password : "" };
-				flags = { 0, 0, SdlInputWidgetPair::SDL_INPUT_MASK };
-			}
+			initial = { "" };
+			flags = { SdlInputWidgetPair::SDL_INPUT_MASK };
+		}
+		else if (args->result != AUTH_SMARTCARD_PIN)
+		{
+			initial = { args->user ? args->user : "", args->domain ? args->domain : "",
+				        args->password ? args->password : "" };
+			flags = { 0, 0, SdlInputWidgetPair::SDL_INPUT_MASK };
 		}
 
 		ssize_t selected = -1;
@@ -591,6 +623,7 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 		{
 			case AUTH_SMARTCARD_PIN:
 			case AUTH_RDSTLS:
+			case AUTH_FIDO_PIN:
 				break;
 			default:
 				if (args->user)
@@ -602,6 +635,7 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 				break;
 		}
 		SdlInputWidgetPairList ilist(args->title, prompt, initial, flags, selected);
+		ilist.parent(parent);
 		rc = ilist.run(result);
 	}
 
@@ -613,13 +647,20 @@ BOOL sdl_auth_dialog_show(const SDL_UserAuthArg* args)
 	char* pwd = nullptr;
 	if (rc > 0)
 	{
-		user = _strdup(result[0].c_str());
-		if (args->result == AUTH_SMARTCARD_PIN)
-			pwd = _strdup(result[1].c_str());
+		if (args->result == AUTH_FIDO_PIN)
+		{
+			pwd = _strdup(result.at(0).c_str());
+		}
 		else
 		{
-			domain = _strdup(result[1].c_str());
-			pwd = _strdup(result[2].c_str());
+			user = _strdup(result.at(0).c_str());
+			if (args->result == AUTH_SMARTCARD_PIN)
+				pwd = _strdup(result.at(1).c_str());
+			else
+			{
+				domain = _strdup(result.at(1).c_str());
+				pwd = _strdup(result.at(2).c_str());
+			}
 		}
 	}
 

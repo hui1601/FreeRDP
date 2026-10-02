@@ -10,7 +10,6 @@
 
 #import "AboutController.h"
 #import "Utils.h"
-#import "BlockAlertView.h"
 
 @implementation AboutController
 
@@ -45,12 +44,13 @@
 // Implement loadView to create a view hierarchy programmatically, without using a nib.
 - (void)loadView
 {
-	webView = [[[UIWebView alloc] initWithFrame:CGRectZero] autorelease];
+	WKWebViewConfiguration *config = [[[WKWebViewConfiguration alloc] init] autorelease];
+	[config setDataDetectorTypes:WKDataDetectorTypeNone];
+	webView = [[[WKWebView alloc] initWithFrame:CGRectZero configuration:config] autorelease];
 	[webView
 	    setAutoresizingMask:(UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight)];
 	[webView setAutoresizesSubviews:YES];
-	[webView setDelegate:self];
-	[webView setDataDetectorTypes:UIDataDetectorTypeNone];
+	[webView setNavigationDelegate:self];
 	[self setView:webView];
 }
 
@@ -83,38 +83,55 @@
 }
 
 #pragma mark -
-#pragma mark UIWebView callbacks
-- (BOOL)webView:(UIWebView *)webView
-    shouldStartLoadWithRequest:(NSURLRequest *)request
-                navigationType:(UIWebViewNavigationType)navigationType
+#pragma mark WKWebView callbacks
+- (void)webView:(WKWebView *)wv
+    decidePolicyForNavigationAction:(WKNavigationAction *)navigationAction
+                    decisionHandler:(void (^)(WKNavigationActionPolicy))decisionHandler
 {
-	if ([[request URL] isFileURL])
-		return YES;
+	NSURLRequest *request = [navigationAction request];
 
-	if (navigationType == UIWebViewNavigationTypeLinkClicked)
+	if ([[request URL] isFileURL])
+	{
+		decisionHandler(WKNavigationActionPolicyAllow);
+		return;
+	}
+
+	if ([navigationAction navigationType] == WKNavigationTypeLinkActivated)
 	{
 		[last_link_clicked release];
 		last_link_clicked = [[[request URL] absoluteString] retain];
-		BlockAlertView *alert = [BlockAlertView
-		    alertWithTitle:NSLocalizedString(@"External Link", @"External Link Alert Title")
-		           message:[NSString stringWithFormat:
-		                                 NSLocalizedString(
-		                                     @"Open [%@] in Browser?",
-		                                     @"Open link in browser (with link as parameter)"),
-		                                 last_link_clicked]];
+		UIAlertController *alert = [UIAlertController
+		    alertControllerWithTitle:NSLocalizedString(@"External Link",
+		                                               @"External Link Alert Title")
+		                     message:[NSString
+		                                 stringWithFormat:
+		                                     NSLocalizedString(
+		                                         @"Open [%@] in Browser?",
+		                                         @"Open link in browser (with link as parameter)"),
+		                                     last_link_clicked]
+		              preferredStyle:UIAlertControllerStyleAlert];
 
-		[alert setCancelButtonWithTitle:NSLocalizedString(@"No", @"No Button") block:nil];
-		[alert addButtonWithTitle:NSLocalizedString(@"OK", @"OK Button")
-		                    block:^{
-			                    [[UIApplication sharedApplication]
-			                        openURL:[NSURL URLWithString:last_link_clicked]];
-		                    }];
+		[alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"No", @"No Button")
+		                                          style:UIAlertActionStyleCancel
+		                                        handler:nil]];
+		[alert
+		    addAction:[UIAlertAction
+		                  actionWithTitle:NSLocalizedString(@"OK", @"OK Button")
+		                            style:UIAlertActionStyleDefault
+		                          handler:^(UIAlertAction *action) {
+			                          [[UIApplication sharedApplication]
+			                                        openURL:[NSURL URLWithString:last_link_clicked]
+			                                        options:@{}
+			                              completionHandler:nil];
+		                          }]];
 
-		[alert show];
+		[self presentViewController:alert animated:YES completion:nil];
 
-		return NO;
+		decisionHandler(WKNavigationActionPolicyCancel);
+		return;
 	}
-	return YES;
+
+	decisionHandler(WKNavigationActionPolicyAllow);
 }
 
 @end

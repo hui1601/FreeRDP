@@ -35,21 +35,25 @@
 #include "crypto.h"
 #include "privatekey.h"
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
+
 #define TAG FREERDP_TAG("crypto")
 
 static SSIZE_T crypto_rsa_common(const BYTE* input, size_t length, UINT32 key_length,
                                  const BYTE* modulus, const BYTE* exponent, size_t exponent_size,
                                  BYTE* output, size_t out_length)
 {
-	BN_CTX* ctx = NULL;
+	BN_CTX* ctx = nullptr;
 	int output_length = -1;
-	BYTE* input_reverse = NULL;
-	BYTE* modulus_reverse = NULL;
-	BYTE* exponent_reverse = NULL;
-	BIGNUM* mod = NULL;
-	BIGNUM* exp = NULL;
-	BIGNUM* x = NULL;
-	BIGNUM* y = NULL;
+	BYTE* input_reverse = nullptr;
+	BYTE* modulus_reverse = nullptr;
+	BYTE* exponent_reverse = nullptr;
+	BIGNUM* mod = nullptr;
+	BIGNUM* exp = nullptr;
+	BIGNUM* x = nullptr;
+	BIGNUM* y = nullptr;
 	size_t bufferSize = 0;
 
 	if (!input || !modulus || !exponent || !output)
@@ -72,11 +76,11 @@ static SSIZE_T crypto_rsa_common(const BYTE* input, size_t length, UINT32 key_le
 
 	modulus_reverse = input_reverse + key_length;
 	exponent_reverse = modulus_reverse + key_length;
-	memcpy(modulus_reverse, modulus, key_length);
+	memmove(modulus_reverse, modulus, key_length);
 	crypto_reverse(modulus_reverse, key_length);
-	memcpy(exponent_reverse, exponent, exponent_size);
+	memmove(exponent_reverse, exponent, exponent_size);
 	crypto_reverse(exponent_reverse, exponent_size);
-	memcpy(input_reverse, input, length);
+	memmove(input_reverse, input, length);
 	crypto_reverse(input_reverse, length);
 
 	if (!(ctx = BN_CTX_new()))
@@ -103,10 +107,13 @@ static SSIZE_T crypto_rsa_common(const BYTE* input, size_t length, UINT32 key_le
 		goto fail;
 	if (BN_mod_exp(y, x, exp, mod, ctx) != 1)
 		goto fail;
-	output_length = BN_bn2bin(y, output);
+	{
+		const int len = BN_num_bytes(y);
+		if ((len < 0) || (WINPR_ASSERTING_INT_CAST(size_t, len) > out_length))
+			goto fail;
+		output_length = BN_bn2bin(y, output);
+	}
 	if (output_length < 0)
-		goto fail;
-	if (WINPR_ASSERTING_INT_CAST(size_t, output_length) > out_length)
 		goto fail;
 	crypto_reverse(output, WINPR_ASSERTING_INT_CAST(size_t, output_length));
 
@@ -188,50 +195,65 @@ void crypto_reverse(BYTE* data, size_t length)
 
 char* crypto_read_pem(const char* WINPR_RESTRICT filename, size_t* WINPR_RESTRICT plength)
 {
-	char* pem = NULL;
-	FILE* fp = NULL;
+	char* pem = nullptr;
+	FILE* fp = nullptr;
 
 	WINPR_ASSERT(filename);
 
 	if (plength)
 		*plength = 0;
 
-	fp = winpr_fopen(filename, "r");
+	/* Binary mode: the size is taken from SEEK_END and then demanded in a single fread().
+	 * In text mode on Windows CRLF collapses to LF, fewer than size bytes come back and the
+	 * read fails, which makes every CRLF-terminated PEM unreadable -- and that is what the
+	 * Windows tooling writes. */
+	fp = winpr_fopen(filename, "rb");
 	if (!fp)
 		goto fail;
-	const int rs = _fseeki64(fp, 0, SEEK_END);
-	if (rs < 0)
-		goto fail;
-	const int64_t size = _ftelli64(fp);
-	if (size < 0)
-		goto fail;
-	const int rc = _fseeki64(fp, 0, SEEK_SET);
-	if (rc < 0)
-		goto fail;
 
-	pem = calloc(WINPR_ASSERTING_INT_CAST(size_t, size) + 1, sizeof(char));
-	if (!pem)
-		goto fail;
+	{
+		const int rs = _fseeki64(fp, 0, SEEK_END);
+		if (rs < 0)
+			goto fail;
+	}
 
-	const size_t fr = fread(pem, (size_t)size, 1, fp);
-	if (fr != 1)
-		goto fail;
+	{
+		const int64_t size = _ftelli64(fp);
+		if (size < 0)
+			goto fail;
 
-	if (plength)
-		*plength = strnlen(pem, WINPR_ASSERTING_INT_CAST(size_t, size));
+		{
+			const int rc = _fseeki64(fp, 0, SEEK_SET);
+			if (rc < 0)
+				goto fail;
+		}
+
+		pem = calloc(WINPR_ASSERTING_INT_CAST(size_t, size) + 1, sizeof(char));
+		if (!pem)
+			goto fail;
+
+		{
+			const size_t fr = fread(pem, (size_t)size, 1, fp);
+			if (fr != 1)
+				goto fail;
+		}
+
+		if (plength)
+			*plength = strnlen(pem, WINPR_ASSERTING_INT_CAST(size_t, size));
+	}
 	(void)fclose(fp);
 	return pem;
 
 fail:
 {
-	char buffer[8192] = { 0 };
+	char buffer[8192] = WINPR_C_ARRAY_INIT;
 	WLog_WARN(TAG, "Failed to read PEM from file '%s' [%s]", filename,
 	          winpr_strerror(errno, buffer, sizeof(buffer)));
 }
 	if (fp)
 		(void)fclose(fp);
 	free(pem);
-	return NULL;
+	return nullptr;
 }
 
 BOOL crypto_write_pem(const char* WINPR_RESTRICT filename, const char* WINPR_RESTRICT pem,
@@ -248,12 +270,35 @@ BOOL crypto_write_pem(const char* WINPR_RESTRICT filename, const char* WINPR_RES
 	FILE* fp = winpr_fopen(filename, "w");
 	if (!fp)
 		goto fail;
+#if !defined(_WIN32)
+	const int res = fchmod(fileno(fp), S_IRUSR | S_IWUSR);
+	if (res != 0)
+	{
+		char buffer[128] = WINPR_C_ARRAY_INIT;
+		WLog_WARN(TAG, "Failed to chmod %s: %s", filename,
+		          winpr_strerror(errno, buffer, sizeof(buffer)));
+		const int fres = fclose(fp);
+		if (fres != 0)
+		{
+			char buffer2[128] = WINPR_C_ARRAY_INIT;
+			WLog_WARN(TAG, "Failed to close PEM [%" PRIuz "] to file '%s' [%s]", length, filename,
+			          winpr_strerror(errno, buffer2, sizeof(buffer2)));
+		}
+		goto fail;
+	}
+#endif
 	rc = fwrite(pem, 1, size, fp);
-	(void)fclose(fp);
+	const int fres = fclose(fp);
+	if (fres != 0)
+	{
+		char buffer[128] = WINPR_C_ARRAY_INIT;
+		WLog_WARN(TAG, "Failed to close PEM [%" PRIuz "] to file '%s' [%s]", length, filename,
+		          winpr_strerror(errno, buffer, sizeof(buffer)));
+	}
 fail:
 	if (rc == 0)
 	{
-		char buffer[8192] = { 0 };
+		char buffer[128] = WINPR_C_ARRAY_INIT;
 		WLog_WARN(TAG, "Failed to write PEM [%" PRIuz "] to file '%s' [%s]", length, filename,
 		          winpr_strerror(errno, buffer, sizeof(buffer)));
 	}
