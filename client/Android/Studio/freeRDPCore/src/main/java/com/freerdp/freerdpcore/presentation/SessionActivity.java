@@ -33,6 +33,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import java.io.StringWriter;
+import java.io.PrintWriter;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -85,8 +89,8 @@ public class SessionActivity extends AppCompatActivity
 	private static final int SCROLLING_DISTANCE = 20;
 	private static final String TAG = "FreeRDP.SessionActivity";
 	// variables for delayed move event sending
-	private static final int MAX_DISCARDED_MOVE_EVENTS = 3;
-	private static final int SEND_MOVE_EVENT_TIMEOUT = 150;
+	private static final int MAX_DISCARDED_MOVE_EVENTS = 1;
+	private static final int SEND_MOVE_EVENT_TIMEOUT = 10;
 	private Bitmap bitmap;
 	private SessionState session;
 	private SessionView sessionView;
@@ -122,7 +126,9 @@ public class SessionActivity extends AppCompatActivity
 	private boolean extKeyboardVisible = false;
 	private int discardedMoveEvents = 0;
 	private ClipboardManagerProxy mClipboardManager;
+	private boolean mClipboardIsRemoteUpdate = false;
 	private boolean callbackDialogResult;
+	private boolean explicitDisconnect = false;
 	View mDecor;
 
 	private void createDialogs()
@@ -214,6 +220,13 @@ public class SessionActivity extends AppCompatActivity
 	{
 		super.onCreate(savedInstanceState);
 
+        if (getIntent().hasExtra(PARAM_CRASH_INFO)) {
+            showCrashDialog(getIntent().getStringExtra(PARAM_CRASH_INFO));
+            return;
+        }
+
+        Thread.setDefaultUncaughtExceptionHandler(new CrashHandler(getApplicationContext()));
+
 		// show status bar or make fullscreen?
 		if (ApplicationSettingsActivity.getHideStatusBar(this))
 		{
@@ -243,8 +256,10 @@ public class SessionActivity extends AppCompatActivity
 		    new OnGlobalLayoutListener() {
 			    @Override public void onGlobalLayout()
 			    {
-				    screen_width = activityRootView.getWidth();
-				    screen_height = activityRootView.getHeight();
+				    screen_width = activityRootView.getWidth() - activityRootView.getPaddingLeft() -
+				                   activityRootView.getPaddingRight();
+				    screen_height = activityRootView.getHeight() - activityRootView.getPaddingTop() -
+				                    activityRootView.getPaddingBottom();
 
 				    // start session
 				    if (!sessionRunning && getIntent() != null)
@@ -326,6 +341,8 @@ public class SessionActivity extends AppCompatActivity
 	@Override public void onWindowFocusChanged(boolean hasFocus)
 	{
 		super.onWindowFocusChanged(hasFocus);
+		if (hasFocus)
+			com.freerdp.freerdpcore.utils.SamsungDexUtils.dexMetaKeyCapture(this, true);
 		mClipboardManager.getPrimaryClipManually();
 	}
 
@@ -345,12 +362,14 @@ public class SessionActivity extends AppCompatActivity
 	{
 		super.onResume();
 		Log.v(TAG, "Session.onResume");
+		com.freerdp.freerdpcore.utils.SamsungDexUtils.dexMetaKeyCapture(this, true);
 	}
 
 	@Override protected void onPause()
 	{
 		super.onPause();
 		Log.v(TAG, "Session.onPause");
+		com.freerdp.freerdpcore.utils.SamsungDexUtils.dexMetaKeyCapture(this, false);
 
 		// hide any visible keyboards
 		showKeyboard(false, false);
@@ -715,6 +734,7 @@ public class SessionActivity extends AppCompatActivity
 		else if (itemId == R.id.session_disconnect)
 		{
 			showKeyboard(false, false);
+			explicitDisconnect = true;
 			LibFreeRDP.disconnect(session.getInstance());
 		}
 
@@ -736,34 +756,34 @@ public class SessionActivity extends AppCompatActivity
 	{
 		if (keyCode == KeyEvent.KEYCODE_BACK)
 		{
+			explicitDisconnect = true;
 			LibFreeRDP.disconnect(session.getInstance());
 			return true;
 		}
 		return super.onKeyLongPress(keyCode, event);
 	}
 
-	// android keyboard input handling
-	// We always use the unicode value to process input from the android
-	// keyboard except if key modifiers
-	// (like Win, Alt, Ctrl) are activated. In this case we will send the
-	// virtual key code to allow key
-	// combinations (like Win + E to open the explorer).
-	@Override public boolean onKeyDown(int keycode, KeyEvent event)
+	public boolean processLocalKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            syncModifiers(event);
+        }
+        return keyboardMapper.processAndroidKeyEvent(event);
+    }
+
+	@Override public boolean dispatchKeyEvent(KeyEvent event)
 	{
-		return keyboardMapper.processAndroidKeyEvent(event);
+		if (processLocalKeyEvent(event))
+			return true;
+		return super.dispatchKeyEvent(event);
 	}
 
-	@Override public boolean onKeyUp(int keycode, KeyEvent event)
-	{
-		return keyboardMapper.processAndroidKeyEvent(event);
-	}
-
-	// onKeyMultiple is called for input of some special characters like umlauts
-	// and some symbol characters
-	@Override public boolean onKeyMultiple(int keyCode, int repeatCount, KeyEvent event)
-	{
-		return keyboardMapper.processAndroidKeyEvent(event);
-	}
+    @Override
+    public boolean dispatchKeyShortcutEvent(KeyEvent event) {
+        Log.v(TAG, "dispatchKeyShortcutEvent: " + event);
+        if (processLocalKeyEvent(event))
+            return true;
+        return super.dispatchKeyShortcutEvent(event);
+    }
 
 	// ****************************************************************************
 	// KeyboardView.KeyboardActionEventListener
@@ -802,10 +822,35 @@ public class SessionActivity extends AppCompatActivity
 
 	// ****************************************************************************
 	// KeyboardMapper.KeyProcessingListener implementation
-	@Override public void processVirtualKey(int virtualKeyCode, boolean down)
-	{
-		LibFreeRDP.sendKeyEvent(session.getInstance(), virtualKeyCode, down);
-	}
+    @Override
+    public void processVirtualKey(int virtualKeyCode, boolean down)
+    {
+        LibFreeRDP.sendKeyEvent(session.getInstance(), virtualKeyCode, down);
+    }
+    
+    private void syncModifiers(KeyEvent event) {
+        int metaState = event.getMetaState();
+
+        sendModifierKey(event.isAltPressed(), metaState, KeyEvent.META_ALT_RIGHT_ON,
+                        KeyboardMapper.VK_LMENU, KeyboardMapper.VK_RMENU);
+        sendModifierKey(event.isShiftPressed(), metaState, KeyEvent.META_SHIFT_RIGHT_ON,
+                        KeyboardMapper.VK_LSHIFT, KeyboardMapper.VK_RSHIFT);
+        sendModifierKey(event.isCtrlPressed(), metaState, KeyEvent.META_CTRL_RIGHT_ON,
+                        KeyboardMapper.VK_LCONTROL, KeyboardMapper.VK_RCONTROL);
+        sendModifierKey(event.isMetaPressed(), metaState, KeyEvent.META_META_RIGHT_ON,
+                        KeyboardMapper.VK_LWIN, KeyboardMapper.VK_RWIN);
+    }
+
+    private void sendModifierKey(boolean isPressed, int metaState, int rightMask, int leftKey,
+                                 int rightKey) {
+        if (isPressed) {
+            boolean isRight = (metaState & rightMask) != 0;
+            LibFreeRDP.sendKeyEvent(session.getInstance(), isRight ? rightKey : leftKey, true);
+        } else {
+            LibFreeRDP.sendKeyEvent(session.getInstance(), leftKey, false);
+            LibFreeRDP.sendKeyEvent(session.getInstance(), rightKey, false);
+        }
+    }
 
 	@Override public void processUnicodeKey(int unicodeKey)
 	{
@@ -1081,6 +1126,7 @@ public class SessionActivity extends AppCompatActivity
 	@Override public void OnRemoteClipboardChanged(String data)
 	{
 		Log.v(TAG, "OnRemoteClipboardChanged: " + data);
+		mClipboardIsRemoteUpdate = true;
 		mClipboardManager.setClipboardData(data);
 	}
 
@@ -1135,8 +1181,8 @@ public class SessionActivity extends AppCompatActivity
 
 	public void onSessionViewRightTouch(int x, int y, boolean down)
 	{
-		if (!down)
-			toggleMouseButtons = !toggleMouseButtons;
+		LibFreeRDP.sendCursorEvent(session.getInstance(), x, y,
+		                           Mouse.getRightButtonEvent(this, down));
 	}
 
 	@Override public void onSessionViewMove(int x, int y)
@@ -1245,6 +1291,11 @@ public class SessionActivity extends AppCompatActivity
 	// ClipboardManagerProxy.OnClipboardChangedListener
 	@Override public void onClipboardChanged(String data)
 	{
+		if (mClipboardIsRemoteUpdate)
+		{
+			mClipboardIsRemoteUpdate = false;
+			return;
+		}
 		Log.v(TAG, "onClipboardChanged: " + data);
 		LibFreeRDP.sendClipboardData(session.getInstance(), data);
 	}
@@ -1480,7 +1531,7 @@ public class SessionActivity extends AppCompatActivity
 			closeSessionActivity(RESULT_CANCELED);
 		}
 
-		private void OnDisconnected(Context context)
+	private void OnDisconnected(Context context)
 		{
 			Log.v(TAG, "OnDisconnected");
 
@@ -1493,8 +1544,72 @@ public class SessionActivity extends AppCompatActivity
 				progressDialog = null;
 			}
 
+			if (!explicitDisconnect && !connectCancelledByUser)
+			{
+				uiHandler.sendMessage(Message.obtain(null, UIHandler.DISPLAY_TOAST,
+				                                     getResources().getText(R.string.list_placeholder_connection_error)));
+			}
+
 			session.setUIEventListener(null);
 			closeSessionActivity(RESULT_OK);
 		}
 	}
+    public static final String PARAM_CRASH_INFO = "crash_info";
+
+    private void showCrashDialog(final String stackTrace) {
+        new AlertDialog.Builder(this)
+            .setTitle("Application Error")
+            .setMessage(stackTrace)
+            .setPositiveButton("Copy", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                     ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                     ClipData clip = ClipData.newPlainText("Crash Log", stackTrace);
+                     clipboard.setPrimaryClip(clip);
+                     Toast.makeText(SessionActivity.this, "Copied to clipboard", Toast.LENGTH_SHORT).show();
+                     finish();
+                }
+            })
+            .setNegativeButton("Close", new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(DialogInterface dialog, int which) {
+                    finish();
+                }
+            })
+            .setCancelable(false)
+            .show();
+    }
+
+    private static class CrashHandler implements Thread.UncaughtExceptionHandler {
+        private final Context context;
+        private final Thread.UncaughtExceptionHandler defaultHandler;
+
+        public CrashHandler(Context context) {
+            this.context = context;
+            this.defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
+        }
+
+        @Override
+        public void uncaughtException(@NonNull Thread thread, @NonNull Throwable throwable) {
+            StringWriter sw = new StringWriter();
+            PrintWriter pw = new PrintWriter(sw);
+            throwable.printStackTrace(pw);
+            String stackTrace = sw.toString();
+
+            try {
+                Intent intent = new Intent(context, SessionActivity.class);
+                intent.putExtra(PARAM_CRASH_INFO, stackTrace);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                context.startActivity(intent);
+            } catch (Exception e) {
+                // If we fail to start activity, fall back to default handler
+                defaultHandler.uncaughtException(thread, throwable);
+                return;
+            }
+
+            // Kill the process to ensure state is cleared
+            android.os.Process.killProcess(android.os.Process.myPid());
+            System.exit(10);
+        }
+    }
 }

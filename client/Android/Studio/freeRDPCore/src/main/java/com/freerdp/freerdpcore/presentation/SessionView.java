@@ -22,6 +22,8 @@ import android.text.InputType;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.InputDevice;
+
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
@@ -250,7 +252,12 @@ public class SessionView extends View
 	{
 		if (event.getKeyCode() == KeyEvent.KEYCODE_BACK &&
 		    event.getAction() == KeyEvent.ACTION_DOWN)
+		{
 			((SessionActivity)this.getContext()).onBackPressed();
+			return true;
+		}
+		if (((SessionActivity)this.getContext()).processLocalKeyEvent(event))
+			return true;
 		return super.dispatchKeyEventPreIme(event);
 	}
 
@@ -275,8 +282,52 @@ public class SessionView extends View
 		return mappedEvent;
 	}
 
+	private int lastButtonState = 0;
+
 	@Override public boolean onTouchEvent(MotionEvent event)
 	{
+		if ((event.getSource() == InputDevice.SOURCE_MOUSE) ||
+		    (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE))
+		{
+			int action = event.getActionMasked();
+			int currentButtonState = event.getButtonState();
+			MotionEvent mappedEvent = mapTouchEvent(event);
+			int x = (int)mappedEvent.getX();
+			int y = (int)mappedEvent.getY();
+
+			if (action == MotionEvent.ACTION_DOWN)
+				sessionViewListener.onSessionViewBeginTouch();
+
+			if (action == MotionEvent.ACTION_CANCEL)
+				currentButtonState = 0;
+
+			int diff = currentButtonState ^ lastButtonState;
+
+			if ((diff & MotionEvent.BUTTON_SECONDARY) != 0)
+			{
+				boolean down = (currentButtonState & MotionEvent.BUTTON_SECONDARY) != 0;
+				sessionViewListener.onSessionViewRightTouch(x, y, down);
+			}
+
+			if ((diff & MotionEvent.BUTTON_PRIMARY) != 0)
+			{
+				boolean down = (currentButtonState & MotionEvent.BUTTON_PRIMARY) != 0;
+				sessionViewListener.onSessionViewLeftTouch(x, y, down);
+			}
+
+			if (action == MotionEvent.ACTION_MOVE)
+			{
+				sessionViewListener.onSessionViewMove(x, y);
+			}
+
+			if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
+				sessionViewListener.onSessionViewEndTouch();
+
+			lastButtonState = currentButtonState;
+			mappedEvent.recycle();
+			return true;
+		}
+
 		boolean res = gestureDetector.onTouchEvent(event);
 		res |= doubleGestureDetector.onTouchEvent(event);
 		return res;

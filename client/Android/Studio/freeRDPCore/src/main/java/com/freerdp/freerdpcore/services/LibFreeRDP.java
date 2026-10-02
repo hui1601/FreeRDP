@@ -308,23 +308,28 @@ public class LibFreeRDP
 		}
 
 		BookmarkBase.PerformanceFlags flags = bookmark.getActivePerformanceFlags();
+		final String network = flags.getNetwork();
+
 		if (flags.getRemoteFX())
 		{
 			args.add("/rfx");
-			args.add("/network:auto");
 		}
 
 		if (flags.getGfx())
 		{
-			args.add("/gfx");
-			args.add("/network:auto");
+			StringBuilder gfxArg = new StringBuilder("/gfx");
+			if (network.equals("modem") || network.equals("broadband-low") || network.equals("satellite")) {
+				gfxArg.append(":thin-client,small-cache,progressive:off");
+			}
+			args.add(gfxArg.toString());
 		}
 
 		if (flags.getH264() && mHasH264)
 		{
 			args.add("/gfx:AVC444");
-			args.add("/network:auto");
 		}
+
+		args.add("/network:" + network);
 
 		args.add(addFlag("wallpaper", flags.getWallpaper()));
 		args.add(addFlag("window-drag", flags.getFullWindowDrag()));
@@ -398,6 +403,11 @@ public class LibFreeRDP
 		}
 
 		args.add("/kbd:unicode:on");
+		args.add("/multitransport");
+		args.add("/auto-reconnect");
+		args.add("/auto-reconnect-max-retries:10");
+		// 10 seconds timeout
+		args.add("/timeout:10000");
 		args.add("/cert:ignore");
 		args.add("/log-level:" + debug.getDebugLevel());
 		String[] arrayArgs = args.toArray(new String[0]);

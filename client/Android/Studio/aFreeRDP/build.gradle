@@ -21,7 +21,7 @@ android {
         targetSdkVersion rootProject.ext.targetApi
         vectorDrawables.useSupportLibrary = true
         versionName = androidGitVersion.name()
-        versionCode = androidGitVersion.code()
+        versionCode = (androidGitVersion.code() > 0) ? androidGitVersion.code() : 1
     }
 
     signingConfigs {

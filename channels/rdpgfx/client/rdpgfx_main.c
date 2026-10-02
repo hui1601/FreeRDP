@@ -1131,6 +1131,31 @@ static UINT rdpgfx_recv_end_frame_pdu(GENERIC_CHANNEL_CALLBACK* callback, wStrea
 	if (!gfx->sendFrameAcks)
 		return error;
 
+	/* Limit frame rate based on connection type */
+	{
+		const UINT32 type =
+		    freerdp_settings_get_uint32(gfx->rdpcontext->settings, FreeRDP_ConnectionType);
+		UINT32 delay = 0;
+
+		switch (type)
+		{
+			case CONNECTION_TYPE_MODEM:
+				delay = 200;
+				break;
+			case CONNECTION_TYPE_BROADBAND_LOW:
+				delay = 100;
+				break;
+			case CONNECTION_TYPE_SATELLITE:
+				delay = 66;
+				break;
+			default:
+				break;
+		}
+
+		if (delay > 0)
+			Sleep(delay);
+	}
+
 	ack.frameId = pdu.frameId;
 	ack.totalFramesDecoded = gfx->TotalDecodedFrames;
 
@@ -2279,6 +2304,15 @@ static UINT init_plugin_cb(GENERIC_DYNVC_PLUGIN* base, rdpContext* rcontext,
 
 	gfx->suspendFrameAcks =
 	    freerdp_settings_get_bool(gfx->rdpcontext->settings, FreeRDP_GfxSuspendFrameAck);
+
+	{
+		const UINT32 type =
+		    freerdp_settings_get_uint32(gfx->rdpcontext->settings, FreeRDP_ConnectionType);
+		if ((type == CONNECTION_TYPE_MODEM) || (type == CONNECTION_TYPE_BROADBAND_LOW) ||
+		    (type == CONNECTION_TYPE_SATELLITE))
+			gfx->suspendFrameAcks = FALSE;
+	}
+
 	gfx->MaxCacheSlots =
 	    freerdp_settings_get_bool(gfx->rdpcontext->settings, FreeRDP_GfxSmallCache) ? 4096 : 25600;
 

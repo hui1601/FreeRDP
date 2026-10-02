@@ -378,6 +378,7 @@ public class BookmarkActivity extends PreferenceActivity implements OnSharedPref
 		bookmarkSettingsChanged(sharedPreferences, "bookmark.port");
 		bookmarkSettingsChanged(sharedPreferences, "bookmark.username");
 		bookmarkSettingsChanged(sharedPreferences, "bookmark.resolution");
+		bookmarkSettingsChanged(sharedPreferences, "bookmark.perf_network");
 	}
 
 	private void bookmarkSettingsChanged(SharedPreferences sharedPreferences, String key)
@@ -417,6 +418,13 @@ public class BookmarkActivity extends PreferenceActivity implements OnSharedPref
 			resolution += "@" + sharedPreferences.getInt("bookmark.colors", 16);
 			findPreference("bookmark.screen").setSummary(resolution);
 		}
+		else if (key.equals("bookmark.perf_network"))
+		{
+			ListPreference listPreference = (ListPreference)findPreference(key);
+			if (listPreference != null) {
+                listPreference.setSummary(listPreference.getEntry());
+            }
+		}
 	}
 
 	private void initAdvancedSettings(SharedPreferences sharedPreferences)
@@ -427,6 +435,7 @@ public class BookmarkActivity extends PreferenceActivity implements OnSharedPref
 		advancedSettingsChanged(sharedPreferences, "bookmark.resolution_3g");
 		advancedSettingsChanged(sharedPreferences, "bookmark.remote_program");
 		advancedSettingsChanged(sharedPreferences, "bookmark.work_dir");
+		advancedSettingsChanged(sharedPreferences, "bookmark.perf_network_3g");
 	}
 
 	private void advancedSettingsChanged(SharedPreferences sharedPreferences, String key)
@@ -463,6 +472,13 @@ public class BookmarkActivity extends PreferenceActivity implements OnSharedPref
 			findPreference(key).setSummary(sharedPreferences.getString(key, ""));
 		else if (key.equals("bookmark.work_dir"))
 			findPreference(key).setSummary(sharedPreferences.getString(key, ""));
+		else if (key.equals("bookmark.perf_network_3g"))
+		{
+			ListPreference listPreference = (ListPreference)findPreference(key);
+			if (listPreference != null) {
+                listPreference.setSummary(listPreference.getEntry());
+            }
+		}
 	}
 
 	private void initCredentialsSettings(SharedPreferences sharedPreferences)

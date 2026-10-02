@@ -246,6 +246,7 @@ public class BookmarkBase implements Parcelable, Cloneable
 		editor.putBoolean("bookmark.perf_window_dragging", performanceFlags.getFullWindowDrag());
 		editor.putBoolean("bookmark.perf_menu_animation", performanceFlags.getMenuAnimations());
 		editor.putBoolean("bookmark.perf_themes", performanceFlags.getTheming());
+		editor.putString("bookmark.perf_network", performanceFlags.getNetwork());
 
 		editor.putBoolean("bookmark.enable_3g_settings", advancedSettings.getEnable3GSettings());
 
@@ -272,6 +273,8 @@ public class BookmarkBase implements Parcelable, Cloneable
 		                  advancedSettings.getPerformance3G().getMenuAnimations());
 		editor.putBoolean("bookmark.perf_themes_3g",
 		                  advancedSettings.getPerformance3G().getTheming());
+		editor.putString("bookmark.perf_network_3g",
+		                 advancedSettings.getPerformance3G().getNetwork());
 
 		editor.putBoolean("bookmark.redirect_sdcard", advancedSettings.getRedirectSDCard());
 		editor.putInt("bookmark.redirect_sound", advancedSettings.getRedirectSound());
@@ -314,6 +317,7 @@ public class BookmarkBase implements Parcelable, Cloneable
 		performanceFlags.setMenuAnimations(
 		    sharedPrefs.getBoolean("bookmark.perf_menu_animation", false));
 		performanceFlags.setTheming(sharedPrefs.getBoolean("bookmark.perf_themes", false));
+		performanceFlags.setNetwork(sharedPrefs.getString("bookmark.perf_network", "auto"));
 
 		advancedSettings.setEnable3GSettings(
 		    sharedPrefs.getBoolean("bookmark.enable_3g_settings", false));
@@ -342,6 +346,8 @@ public class BookmarkBase implements Parcelable, Cloneable
 		    sharedPrefs.getBoolean("bookmark.perf_menu_animation_3g", false));
 		advancedSettings.getPerformance3G().setTheming(
 		    sharedPrefs.getBoolean("bookmark.perf_themes_3g", false));
+		advancedSettings.getPerformance3G().setNetwork(
+		    sharedPrefs.getString("bookmark.perf_network_3g", "auto"));
 
 		advancedSettings.setRedirectSDCard(
 		    sharedPrefs.getBoolean("bookmark.redirect_sdcard", false));
@@ -395,6 +401,7 @@ public class BookmarkBase implements Parcelable, Cloneable
 		private boolean menuAnimations;
 		private boolean fontSmoothing;
 		private boolean desktopComposition;
+		private String network;
 
 		public PerformanceFlags()
 		{
@@ -407,6 +414,7 @@ public class BookmarkBase implements Parcelable, Cloneable
 			menuAnimations = false;
 			fontSmoothing = false;
 			desktopComposition = false;
+			network = "auto";
 		}
 
 		public PerformanceFlags(Parcel parcel)
@@ -420,6 +428,7 @@ public class BookmarkBase implements Parcelable, Cloneable
 			menuAnimations = parcel.readInt() == 1;
 			fontSmoothing = parcel.readInt() == 1;
 			desktopComposition = parcel.readInt() == 1;
+			network = parcel.readString();
 		}
 
 		public boolean getRemoteFX()
@@ -512,6 +521,16 @@ public class BookmarkBase implements Parcelable, Cloneable
 			this.desktopComposition = desktopComposition;
 		}
 
+		public String getNetwork()
+		{
+			return network;
+		}
+
+		public void setNetwork(String network)
+		{
+			this.network = network;
+		}
+
 		@Override public int describeContents()
 		{
 			return 0;
@@ -528,6 +547,7 @@ public class BookmarkBase implements Parcelable, Cloneable
 			out.writeInt(menuAnimations ? 1 : 0);
 			out.writeInt(fontSmoothing ? 1 : 0);
 			out.writeInt(desktopComposition ? 1 : 0);
+			out.writeString(network);
 		}
 	}
 

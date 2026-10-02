@@ -113,6 +113,25 @@
     <string name="settings_perf_full_window_drag">Window contents while dragging</string>
     <string name="settings_perf_menu_animation">Menu Animation</string>
     <string name="settings_perf_theming">Visual Styles</string>
+    <string name="settings_perf_network">Network Connection Type</string>
+    <string-array name="performance_network_array">
+        <item>Auto Detect</item>
+        <item>Modem (56 Kbit/s)</item>
+        <item>Broadband Low (256 Kbit/s)</item>
+        <item>Satellite (2 Mbit/s)</item>
+        <item>Broadband High (10 Mbit/s)</item>
+        <item>WAN (10 Mbit/s)</item>
+        <item>LAN (10 Mbit/s)</item>
+    </string-array>
+    <string-array name="performance_network_values_array" translatable="false">
+        <item>auto</item>
+        <item>modem</item>
+        <item>broadband-low</item>
+        <item>satellite</item>
+        <item>broadband-high</item>
+        <item>wan</item>
+        <item>lan</item>
+    </string-array>
     <string name="settings_advanced">Advanced</string>
     <string name="settings_cat_advanced">Advanced Settings</string>
     <string name="settings_enable_3g_settings">3G Settings</string>

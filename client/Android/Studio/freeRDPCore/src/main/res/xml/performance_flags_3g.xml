@@ -10,6 +10,12 @@
  -->
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
     <PreferenceCategory android:title="@string/settings_cat_performance">
+        <ListPreference
+            android:defaultValue="auto"
+            android:entries="@array/performance_network_array"
+            android:entryValues="@array/performance_network_values_array"
+            android:key="bookmark.perf_network_3g"
+            android:title="@string/settings_perf_network" />
         <CheckBoxPreference
             android:key="bookmark.perf_remotefx_3g"
             android:title="@string/settings_perf_remotefx" />
